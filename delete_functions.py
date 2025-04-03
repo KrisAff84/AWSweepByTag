@@ -52,9 +52,10 @@ def delete_vpc_endpoint(arn):
         # Check for any errors in the response
         if 'Unsuccessful' in response:
             for error in response['Unsuccessful']:
+                # Check if VPC endpoint was already deleted
                 if 'Error' in error and error['Error']['Code'] == 'InvalidVpcEndpoint.NotFound':
                     print(f"VPC endpoint {endpoint_id} was already deleted.")
-                    return None  # Skip further actions for this resource as it's already deleted
+                    return None
 
         # If deletion is successful
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -82,9 +83,10 @@ def delete_internet_gateway(arn):
             vpc_id = attachment.get('VpcId')
             if vpc_id:
                 client.detach_internet_gateway(InternetGatewayId=gateway_id, VpcId=vpc_id)
+                print(f"Internet Gateway {gateway_id} was successfully detached from VPC {vpc_id}")
 
     except botocore.exceptions.ClientError as e:
-        print(f"DEBUG: Failed to detach Internet Gateway {gateway_id}, error: {str(e)}")
+        print(f"Failed to detach Internet Gateway {gateway_id}, error: {str(e)}")
         return
 
     # Delete Internet Gateway after it has been detached

@@ -49,6 +49,26 @@ def parse_resource_by_type(resource):
     return resource_for_deletion
 
 
+def order_resources_for_deletion(resources):
+
+
+    networking_resources = [resource for resource in resources if "ec2" in resource["service"]]
+    non_networking_resources = [resource for resource in resources if "ec2" not in resource["service"]]
+
+    ordered_resources = []
+    ordered_resources.extend([resource for resource in non_networking_resources])
+    ordered_resources.extend([resource for resource in networking_resources if "vpcendpoint" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in networking_resources if "natgateway" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in networking_resources if "subnet" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in networking_resources if "eip" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in networking_resources if "routetable" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in networking_resources if "internetgateway" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in networking_resources if resource["resource_type"] == "vpc"])
+
+    return ordered_resources
+
+
+
 def delete_resource(resource):
     """Finds and calls the appropriate delete function based on the resource type."""
     service = resource['service']
@@ -74,7 +94,7 @@ def delete_resource(resource):
         return None
 
 
-def retry_failed_deletions(failed_resources, max_retries=3, wait_time=10):
+def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
     """Retries failed deletions up to max_retries times with exponential backoff."""
 
     for attempt in range(1, max_retries + 1):
@@ -89,7 +109,7 @@ def retry_failed_deletions(failed_resources, max_retries=3, wait_time=10):
             try:
                 result = delete_resource(resource)  # Returns failed resources if deletion still fails
                 if result:
-                    new_failed_resources.extend(result)  # Collect still-failed resources
+                    new_failed_resources.append(result)  # Collect still-failed resources
             except botocore.exceptions.ClientError as e:
                 if "DependencyViolation" in str(e):
                     new_failed_resources.append(resource)
@@ -100,7 +120,7 @@ def retry_failed_deletions(failed_resources, max_retries=3, wait_time=10):
             print("All failed deletions were successfully retried.")
             return
 
-        new_failed_resources.reverse()  # Reverse in place
+        # new_failed_resources.reverse()  # Reverse in place
         failed_resources = new_failed_resources  # Update failed resources
         print(f"{len(failed_resources)} resources still cannot be deleted. Retrying in {wait_time} seconds...")
         time.sleep(wait_time)  # Wait before retrying
@@ -121,7 +141,9 @@ def main():
         print(json.dumps(resource_for_deletion, indent=2))
         resources_for_deletion.append(resource_for_deletion)
 
-    print(f"\n{len(resources)} resources queued for deletion. \n")
+    ordered_resources_for_deletion = order_resources_for_deletion(resources_for_deletion)
+
+    print(f"\n{len(ordered_resources_for_deletion)} resources queued for deletion. \n")
     delete = input("Are you sure you want to delete all of these resources? (y/n): \n")
 
     if delete.lower() != 'y':
@@ -131,7 +153,7 @@ def main():
     print("Deleting resources... \n")
     failed_deletions = []
 
-    for resource in resources_for_deletion:
+    for resource in ordered_resources_for_deletion:
         failed_deletion = delete_resource(resource)
         if failed_deletion:
             failed_deletions.append(failed_deletion)
