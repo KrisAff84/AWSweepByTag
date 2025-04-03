@@ -128,12 +128,23 @@ def delete_nat_gateway(arn):
     if deleted == 'deleted' or deleted == 'deleting':
         print(f"Nat gateway {nat_gateway_id} was already deleted")
         return
-    response = client.delete_nat_gateway(NatGatewayId=nat_gateway_id)
-    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        print(f"Nat gateway {nat_gateway_id} was successfully deleted")
-    else:
-        print(f"Nat gateway {nat_gateway_id} was not successfully deleted")
-    print(json.dumps(response, indent=4, default=str))
+    try:
+        client.delete_nat_gateway(NatGatewayId=nat_gateway_id)
+        print(f"Nat gateway {nat_gateway_id} deletion initiated")
+        print("Waiting for NAT Gateway to complete deletion process...")
+        nat_deleted= client.get_waiter('nat_gateway_deleted')
+        nat_deleted.wait(
+            NatGatewayIds=[nat_gateway_id],
+            WaiterConfig={
+                'Delay': 10,
+                'MaxAttempts': 12
+            }
+        )
+        print(f"Nat gateway {nat_gateway_id} has been fully deleted")
+    except Exception as e:
+        print(f"Nat gateway {nat_gateway_id} was not fully deleted: {e}")
+        return
+
 
 def release_eip(arn):
     client = boto3.client('ec2')

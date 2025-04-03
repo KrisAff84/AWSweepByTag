@@ -50,8 +50,6 @@ def parse_resource_by_type(resource):
 
 
 def order_resources_for_deletion(resources):
-
-
     networking_resources = [resource for resource in resources if "ec2" in resource["service"]]
     non_networking_resources = [resource for resource in resources if "ec2" not in resource["service"]]
 
@@ -61,8 +59,8 @@ def order_resources_for_deletion(resources):
     ordered_resources.extend([resource for resource in networking_resources if "natgateway" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in networking_resources if "subnet" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in networking_resources if "eip" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in networking_resources if "routetable" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in networking_resources if "internetgateway" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in networking_resources if "routetable" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in networking_resources if resource["resource_type"] == "vpc"])
 
     return ordered_resources
@@ -83,11 +81,14 @@ def delete_resource(resource):
             DELETE_FUNCTIONS[service][resource_type](arn)
 
         except botocore.exceptions.ClientError as e:
-            if "DependencyViolation" in str(e):
-                return resource
-            else:
-                print(f"Failed to delete {arn}")
-                return None
+            error_code = e.response.get('Error', {}).get('Code', '')
+
+            if error_code == "DependencyViolation":
+                print(f"DEBUG: Dependency violation detected for {arn}, retrying later...")
+                return resource  # ✅ Now it will be retried
+
+            print(f"Failed to delete {arn}, error: {e}")
+            return None
 
     else:
         print(f"No delete function found for {service}::{resource_type}")
@@ -114,7 +115,7 @@ def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
                 if "DependencyViolation" in str(e):
                     new_failed_resources.append(resource)
                 else:
-                    print(f"Failed to delete {resource['arn']}")
+                    print(f"Fail from retry function: Failed to delete {resource['arn']}")
 
         if not new_failed_resources:  # If everything was deleted, exit early
             print("All failed deletions were successfully retried.")
