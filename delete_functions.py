@@ -345,6 +345,67 @@ def delete_lambda_function(arn):
         print(f"Lambda function {arn} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
 
+########################### S3 Service ##############################
+
+def delete_s3_bucket(arn):
+    '''
+    Checks to see if bucket has objects. If it does, the user will be prompted if they really
+    want to delete the bucket and all of its objects. Works with versioned as well as unversioned buckets.
+    '''
+    client = boto3.client('s3')
+    bucket_name = arn.split(':')[-1]
+
+    try:
+        # Check if versioning is enabled
+        versioning = client.get_bucket_versioning(Bucket=bucket_name)
+        is_versioned = versioning.get('Status') == 'Enabled'
+
+        has_objects = False
+
+        if is_versioned:
+            response = client.list_object_versions(Bucket=bucket_name, MaxKeys=1)
+            has_objects = 'Versions' in response or 'DeleteMarkers' in response
+        else:
+            response = client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
+            has_objects = 'Contents' in response
+
+        if has_objects:
+            confirm = input(f"S3 bucket '{bucket_name}' is not empty. Are you sure you want to delete all contents and the bucket? [y/n]: ").strip().lower()
+            if confirm != 'y':
+                print(f"Skipping deletion of bucket '{bucket_name}'.")
+                return
+
+            print(f"Emptying bucket '{bucket_name}'...")
+
+            if is_versioned:
+                paginator = client.get_paginator('list_object_versions')
+                for page in paginator.paginate(Bucket=bucket_name):
+                    objects_to_delete = []
+                    for version in page.get('Versions', []):
+                        objects_to_delete.append({'Key': version['Key'], 'VersionId': version['VersionId']})
+                    for marker in page.get('DeleteMarkers', []):
+                        objects_to_delete.append({'Key': marker['Key'], 'VersionId': marker['VersionId']})
+                    if objects_to_delete:
+                        client.delete_objects(Bucket=bucket_name, Delete={'Objects': objects_to_delete})
+            else:
+                paginator = client.get_paginator('list_objects_v2')
+                for page in paginator.paginate(Bucket=bucket_name):
+                    objects_to_delete = [{'Key': obj['Key']} for obj in page.get('Contents', [])]
+                    if objects_to_delete:
+                        client.delete_objects(Bucket=bucket_name, Delete={'Objects': objects_to_delete})
+
+        # Delete the bucket
+        print(f"Deleting bucket '{bucket_name}'...")
+        response = client.delete_bucket(Bucket=bucket_name)
+        print(f"S3 bucket '{bucket_name}' successfully deleted.")
+        print(json.dumps(response, indent=4, default=str))
+
+    except client.exceptions.NoSuchBucket:
+        print(f"Bucket '{bucket_name}' does not exist.")
+    except Exception as e:
+        print(f"Error deleting S3 bucket '{bucket_name}': {e}")
+
+
 ########################## SQS Service ##############################
 
 def delete_sqs_queue(arn):
@@ -413,7 +474,7 @@ DELETE_FUNCTIONS = {
         'hostedzone': lambda resource: print("deleting hosted zone"),  # delete_hosted_zone(resource['arn'])
     },
     's3': {
-        'bucket': lambda resource: print("deleting bucket"),  # delete_bucket(resource['XXX'])
+        'bucket': delete_s3_bucket
     },
     'secretsmanager': {
         'secret': lambda resource: print("deleting secret"),  # delete_secret(resource['arn'])
