@@ -4,6 +4,8 @@ import boto3
 import botocore.exceptions
 from delete_functions import DELETE_FUNCTIONS
 
+# TODO Build in logic to place autoscaling group before loadbalancer in deletion order
+# Also need to figure out a way to delete target groups for loadbalancers
 
 def get_resources_by_tag(tag_key, tag_value):
     '''' Gets list of resources by common tag key and value. '''
@@ -12,7 +14,9 @@ def get_resources_by_tag(tag_key, tag_value):
     query = {
         "Type": "TAG_FILTERS_1_0",
         "Query": json.dumps({
-            "ResourceTypeFilters": ["AWS::AllSupported"],
+            "ResourceTypeFilters": [
+                "AWS::AllSupported",
+            ],
             "TagFilters": [
                 {
                     "Key": tag_key,
@@ -33,6 +37,23 @@ def get_resources_by_tag(tag_key, tag_value):
 
         response = client.search_resources(ResourceQuery=query, NextToken=next_token)
 
+    asgclient = boto3.client('autoscaling')
+    autoscaling_groups = asgclient.describe_auto_scaling_groups(
+        Filters=[
+            {
+                'Name': 'tag:{}'.format(tag_key),
+                'Values': [tag_value]
+            }
+        ]
+    )
+
+    for asg in autoscaling_groups.get("AutoScalingGroups", []):
+        asg_arn = asg["AutoScalingGroupARN"]
+        resource = {
+            "ResourceArn": asg_arn,
+            "ResourceType": "AWS::AutoScaling::AutoScalingGroup",
+        }
+        resources.append(resource)
     return resources
 
 
@@ -52,9 +73,13 @@ def parse_resource_by_type(resource):
 def order_resources_for_deletion(resources):
     networking_resources = [resource for resource in resources if "ec2" in resource["service"]]
     non_networking_resources = [resource for resource in resources if "ec2" not in resource["service"]]
+    non_ordered_resources = [resource for resource in non_networking_resources if resource["service"] not in ["elasticloadbalancingv2", "autoscaling"]]
 
     ordered_resources = []
-    ordered_resources.extend([resource for resource in non_networking_resources])
+    ordered_resources.extend([resource for resource in non_ordered_resources])
+    ordered_resources.extend([resource for resource in non_networking_resources if "autoscaling" in resource["service"]])
+    ordered_resources.extend([resource for resource in non_networking_resources if "elasticloadbalancingv2" in resource["service"]])
+    ordered_resources.extend([resource for resource in networking_resources if "instance" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in networking_resources if "vpcendpoint" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in networking_resources if "natgateway" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in networking_resources if "subnet" in resource["resource_type"]])
@@ -85,7 +110,7 @@ def delete_resource(resource):
 
             if error_code == "DependencyViolation":
                 print(f"DEBUG: Dependency violation detected for {arn}, retrying later...")
-                return resource  # ✅ Now it will be retried
+                return resource  # Now it will be retried
 
             print(f"Failed to delete {arn}, error: {e}")
             return None
@@ -139,10 +164,10 @@ def main():
 
     for resource in resources:
         resource_for_deletion = parse_resource_by_type(resource)
-        print(json.dumps(resource_for_deletion, indent=2))
         resources_for_deletion.append(resource_for_deletion)
 
     ordered_resources_for_deletion = order_resources_for_deletion(resources_for_deletion)
+    print(json.dumps(ordered_resources_for_deletion, indent=4, default=str))
 
     print(f"\n{len(ordered_resources_for_deletion)} resources queued for deletion. \n")
     delete = input("Are you sure you want to delete all of these resources? (y/n): \n")
