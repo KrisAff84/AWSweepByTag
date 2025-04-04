@@ -21,6 +21,18 @@ def delete_http_api(arn):
         print(f"HTTP API {arn} was successfully deleted")
     else:
         print(f"HTTP API {arn} was not successfully deleted")
+    print(json.dumps(response, indent=4, default=str))
+
+
+def delete_rest_api(arn):
+    client = boto3.client('apigateway')
+    api_id = arn.split('/')[-1]
+    response = client.delete_rest_api(restApiId=api_id)
+    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+        print(f"REST API {arn} was successfully deleted")
+    else:
+        print(f"REST API {arn} was not successfully deleted")
+    print(json.dumps(response, indent=4, default=str))
 
 ####################### AutoScaling Service #########################
 
@@ -33,6 +45,64 @@ def delete_autoscaling_group(arn):
     else:
         print(f"Autoscaling group {arn} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
+
+####################### CloudFront Service ##########################
+
+def delete_cloudfront_distribution(arn):
+    client = boto3.client('cloudfront')
+    distribution_id = arn.split('/')[-1]
+
+    # Get the current distribution config
+    distribution = client.get_distribution(Id=distribution_id)
+    etag = distribution['ETag']
+
+    # Check if distribution is already disabled
+    if distribution['Distribution']['Status'] == 'Deployed' and distribution['Distribution']['DistributionConfig']['Enabled']:
+        # Get the current config
+        config = distribution['Distribution']['DistributionConfig']
+
+        # Set enabled to False
+        config['Enabled'] = False
+
+        # Update the distribution to disable it
+        print(f"Disabling distribution {distribution_id}...")
+        response = client.update_distribution(
+            Id=distribution_id,
+            DistributionConfig=config,
+            IfMatch=etag
+        )
+
+        # Wait for distribution to be fully deployed
+        print("Waiting for distribution to be disabled...")
+        waiter = client.get_waiter('distribution_deployed')
+        waiter.wait(
+            Id=distribution_id,
+            WaiterConfig={
+                'Delay': 30,
+                'MaxAttempts': 60
+            }
+        )
+
+        # Get the new ETag after disable
+        distribution = client.get_distribution(Id=distribution_id)
+        etag = distribution['ETag']
+
+    # Now delete the distribution
+    try:
+        response = client.delete_distribution(
+            Id=distribution_id,
+            IfMatch=etag
+        )
+        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+            print(f"CloudFront distribution {arn} was successfully deleted")
+        else:
+            print(f"CloudFront distribution {arn} was not successfully deleted")
+        print(json.dumps(response, indent=4, default=str))
+    except client.exceptions.DistributionNotDisabled:
+        print(f"Distribution {distribution_id} is not yet fully disabled. Please try again in a few minutes.")
+    except Exception as e:
+        print(f"Error deleting distribution {distribution_id}: {str(e)}")
+
 
 ########################### EC2 Service #############################
 
@@ -258,7 +328,7 @@ def delete_sqs_queue(arn):
 
 DELETE_FUNCTIONS = {
     'apigateway': {
-        'restapi': lambda resource: print("deleting rest api"),  # delete_rest_api(resource['arn'])
+        'restapi': delete_rest_api
     },
     'apigatewayv2': {
         'api': delete_http_api
@@ -270,7 +340,7 @@ DELETE_FUNCTIONS = {
         'certificate': lambda resource: print("deleting certificate"),  # delete_certificate(resource['arn'])
     },
     'cloudfront': {
-        'distribution': lambda resource: print("deleting distribution"),  # delete_distribution(resource['arn'])
+        'distribution': delete_cloudfront_distribution,  # delete_distribution(resource['arn'])
     },
     'dynamodb': {
         'table': lambda resource: print("deleting table"),  # delete_table(resource['arn'])

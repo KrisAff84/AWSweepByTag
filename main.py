@@ -71,14 +71,16 @@ def parse_resource_by_type(resource):
 
 
 def order_resources_for_deletion(resources):
+    # Networking resources that must follow a particular deletion order
     networking_resources = [resource for resource in resources if "ec2" in resource["service"]]
-    non_networking_resources = [resource for resource in resources if "ec2" not in resource["service"]]
-    non_ordered_resources = [resource for resource in non_networking_resources if resource["service"] not in ["elasticloadbalancingv2", "autoscaling"]]
+    # Other resources that must follow a particlar deletion order
+    ordered_non_networking_resources = [resource for resource in resources if "ec2" not in resource["service"]]
+    non_ordered_resources = [resource for resource in ordered_non_networking_resources if resource["service"] not in ["elasticloadbalancingv2", "autoscaling"]]
 
     ordered_resources = []
     ordered_resources.extend([resource for resource in non_ordered_resources])
-    ordered_resources.extend([resource for resource in non_networking_resources if "autoscaling" in resource["service"]])
-    ordered_resources.extend([resource for resource in non_networking_resources if "elasticloadbalancingv2" in resource["service"]])
+    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "autoscaling" in resource["service"]])
+    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "elasticloadbalancingv2" in resource["service"]])
     ordered_resources.extend([resource for resource in networking_resources if "instance" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in networking_resources if "vpcendpoint" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in networking_resources if "natgateway" in resource["resource_type"]])
