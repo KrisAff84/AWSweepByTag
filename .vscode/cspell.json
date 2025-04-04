@@ -3,7 +3,8 @@
   "words": [
     "elasticloadbalancingv2",
     "asgclient",
-    "elbv2"
+    "elbv2",
+    "apigatewayv2"
 
   ]
 

@@ -13,7 +13,10 @@ import boto3
 
 ######################### API GW Services ###########################
 
-def delete_http_api(arn):
+def delete_api(arn):
+    '''
+    Handles HTTP APIs and Websocket APIs.
+    '''
     client = boto3.client('apigatewayv2')
     api_id = arn.split('/')[-1]
     response = client.delete_api(ApiId=api_id)
@@ -52,40 +55,9 @@ def delete_cloudfront_distribution(arn):
     client = boto3.client('cloudfront')
     distribution_id = arn.split('/')[-1]
 
-    # Get the current distribution config
+    # Get the new ETag after disable
     distribution = client.get_distribution(Id=distribution_id)
     etag = distribution['ETag']
-
-    # Check if distribution is already disabled
-    if distribution['Distribution']['Status'] == 'Deployed' and distribution['Distribution']['DistributionConfig']['Enabled']:
-        # Get the current config
-        config = distribution['Distribution']['DistributionConfig']
-
-        # Set enabled to False
-        config['Enabled'] = False
-
-        # Update the distribution to disable it
-        print(f"Disabling distribution {distribution_id}...")
-        response = client.update_distribution(
-            Id=distribution_id,
-            DistributionConfig=config,
-            IfMatch=etag
-        )
-
-        # Wait for distribution to be fully deployed
-        print("Waiting for distribution to be disabled...")
-        waiter = client.get_waiter('distribution_deployed')
-        waiter.wait(
-            Id=distribution_id,
-            WaiterConfig={
-                'Delay': 30,
-                'MaxAttempts': 60
-            }
-        )
-
-        # Get the new ETag after disable
-        distribution = client.get_distribution(Id=distribution_id)
-        etag = distribution['ETag']
 
     # Now delete the distribution
     try:
@@ -103,6 +75,67 @@ def delete_cloudfront_distribution(arn):
     except Exception as e:
         print(f"Error deleting distribution {distribution_id}: {str(e)}")
 
+
+def disable_cloudfront_distribution(arn):
+    client = boto3.client('cloudfront')
+    distribution_id = arn.split('/')[-1]
+     # Get the current distribution config
+    distribution = client.get_distribution(Id=distribution_id)
+    etag = distribution['ETag']
+
+    # Check if distribution is already disabled
+    if distribution['Distribution']['Status'] == 'Deployed' and distribution['Distribution']['DistributionConfig']['Enabled']:
+        # Get the current config
+        config = distribution['Distribution']['DistributionConfig']
+
+        # Set enabled to False
+        config['Enabled'] = False
+
+        # Update the distribution to disable it
+        print(f"Disabling CloudFront distribution {distribution_id}. Will come back to delete.")
+        client.update_distribution(
+            Id=distribution_id,
+            DistributionConfig=config,
+            IfMatch=etag
+        )
+        retry = True
+
+    else:
+        print(f"CloudFront distribution {distribution_id} is already disabled.")
+        try:
+            response = client.delete_distribution(
+                Id=distribution_id,
+                IfMatch=etag
+            )
+            if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+                print(f"CloudFront distribution {arn} was successfully deleted")
+                retry = False
+            else:
+                print(f"CloudFront distribution {arn} was not successfully deleted")
+            print(json.dumps(response, indent=4, default=str))
+        except client.exceptions.DistributionNotDisabled:
+            print(f"CloudFront distribution {distribution_id} is not yet fully disabled. Will retry later.")
+            retry = True
+        except Exception as e:
+            print(f"Error deleting CloudFront distribution {distribution_id}: {str(e)}")
+            retry = True
+
+    return retry
+
+
+def wait_for_distribution_disabled(arn):
+    client = boto3.client('cloudfront')
+    distribution_id = arn.split('/')[-1]
+    print(f"Waiting for CloudFront distribution {distribution_id} to be disabled...")
+    waiter = client.get_waiter('distribution_deployed')
+    waiter.wait(
+        Id=distribution_id,
+        WaiterConfig={
+            'Delay': 30,
+            'MaxAttempts': 20
+        }
+    )
+    print(f"CloudFront distribution {distribution_id} disabled.")
 
 ########################### EC2 Service #############################
 
@@ -298,6 +331,9 @@ def delete_elastic_load_balancer(arn):
         print(f"Load balancer {arn} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
 
+########################### IAM Service #############################
+
+
 ######################### Lambda Service ############################
 
 def delete_lambda_function(arn):
@@ -331,7 +367,7 @@ DELETE_FUNCTIONS = {
         'restapi': delete_rest_api
     },
     'apigatewayv2': {
-        'api': delete_http_api
+        'api': delete_api # For HTTP and websocket APIs
     },
     'autoscaling': {
         'autoscalinggroup': delete_autoscaling_group
@@ -359,16 +395,14 @@ DELETE_FUNCTIONS = {
         'vpcendpoint': delete_vpc_endpoint,
         'vpcpeering': lambda resource: print("deleting vpc peering"),  # delete_vpc_peering_connection(resource['arn'])
     },
-    'elasticloadbalancing': {
-        'loadbalancer': lambda resource: print("deleting load balancer"),  # delete_load_balancer(resource['arn'])
-    },
     'elasticloadbalancingv2': {
         'loadbalancer': delete_elastic_load_balancer
     },
-    'iam': {
-        'policy': lambda resource: print("deleting policy"),  # delete_policy(resource['arn'])
-        'role': lambda resource: print("deleting role"),  # delete_role(resource['arn'])
-    },
+    # 'iam': {
+    #     'managedpolicy': lambda resource: print("deleting managed policy"),  # delete_managed_policy(resource['arn'])
+    #     'policy': lambda resource: print("deleting policy"),  # delete_policy(resource['arn'])
+    #     'role': lambda resource: print("deleting role"),  # delete_role(resource['arn'])
+    # },
     'kms': {
         'key': lambda resource: print("deleting key"),  # delete_key(resource['arn'])
     },

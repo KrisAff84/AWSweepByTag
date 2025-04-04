@@ -2,7 +2,7 @@ import json
 import time
 import boto3
 import botocore.exceptions
-from delete_functions import DELETE_FUNCTIONS
+from delete_functions import DELETE_FUNCTIONS, disable_cloudfront_distribution, wait_for_distribution_disabled, delete_cloudfront_distribution
 
 # TODO Build in logic to place autoscaling group before loadbalancer in deletion order
 # Also need to figure out a way to delete target groups for loadbalancers
@@ -93,7 +93,6 @@ def order_resources_for_deletion(resources):
     return ordered_resources
 
 
-
 def delete_resource(resource):
     """Finds and calls the appropriate delete function based on the resource type."""
     service = resource['service']
@@ -101,6 +100,13 @@ def delete_resource(resource):
     arn = resource['arn']
 
     # print(f"DEBUG: Checking DELETE_FUNCTIONS for service='{service}', resource_type='{resource_type}'")
+
+    if resource_type == "distribution":
+        retry = disable_cloudfront_distribution(arn)
+        if retry:
+            return resource
+        else:
+            return
 
     if service in DELETE_FUNCTIONS and resource_type in DELETE_FUNCTIONS[service]:
         try:
@@ -118,42 +124,58 @@ def delete_resource(resource):
             return None
 
     else:
-        print(f"No delete function found for {service}::{resource_type}")
+        print(f"No delete function found for {service}::{resource_type}. Resource must be deleted manually")
         return None
 
 
 def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
     """Retries failed deletions up to max_retries times with exponential backoff."""
+    # Separate CloudFront distributions from other resources
+    cloudfront_resources = [r for r in failed_resources if r.get("resource_type") == "distribution"]
+    other_resources = [r for r in failed_resources if r.get("resource_type") != "distribution"]
 
+    # Handle CloudFronts first
+    for resource in cloudfront_resources:
+        try:
+            wait_for_distribution_disabled(resource['arn'])
+            delete_cloudfront_distribution(resource['arn'])
+        except Exception as e:
+            print(f"Error deleting CloudFront distribution {resource['arn']} on retry: {str(e)}")
+            other_resources.append(resource)  # Add it back for retry if it still fails
+
+    if other_resources == []:
+        return
+
+    # Retry loop for everything else
     for attempt in range(1, max_retries + 1):
         print(f"\nRetry attempt {attempt}/{max_retries} for failed deletions...\n")
         new_failed_resources = []
 
-        for resource in failed_resources:
-            if isinstance(resource, str):  # Skip if the resource is a string
+        for resource in other_resources:
+            if isinstance(resource, str):
                 print(f"Skipping invalid resource: {resource}")
                 continue
 
             try:
-                result = delete_resource(resource)  # Returns failed resources if deletion still fails
+                result = delete_resource(resource)
                 if result:
-                    new_failed_resources.append(result)  # Collect still-failed resources
+                    new_failed_resources.append(result)
             except botocore.exceptions.ClientError as e:
                 if "DependencyViolation" in str(e):
                     new_failed_resources.append(resource)
                 else:
                     print(f"Fail from retry function: Failed to delete {resource['arn']}")
 
-        if not new_failed_resources:  # If everything was deleted, exit early
-            print("All failed deletions were successfully retried.")
+        if not new_failed_resources:
+            print("All non-CloudFront resources were successfully deleted.")
             return
 
-        # new_failed_resources.reverse()  # Reverse in place
-        failed_resources = new_failed_resources  # Update failed resources
-        print(f"{len(failed_resources)} resources still cannot be deleted. Retrying in {wait_time} seconds...")
-        time.sleep(wait_time)  # Wait before retrying
+        other_resources = new_failed_resources
+        print(f"{len(other_resources)} resources still cannot be deleted. Retrying in {wait_time} seconds...")
+        time.sleep(wait_time)
 
-    print(f"\nFinal retry attempt reached. {len(failed_resources)} resources could not be deleted.\n")
+    if other_resources:
+        print(f"\nFinal retry attempt reached. {len(other_resources)} resources could not be deleted.\n")
 
 
 def main():
@@ -187,7 +209,6 @@ def main():
             failed_deletions.append(failed_deletion)
 
     if failed_deletions:
-        print("\n Retrying failed deletions...")
         retry_failed_deletions(failed_deletions)
 
 
