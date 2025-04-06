@@ -140,7 +140,7 @@ def delete_resource(resource):
         print(f"No delete function found for {service}::{resource_type}. Resource must be deleted manually")
         return None
 
-
+# Need to print a statement when all resources have been deleted
 def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
     """Retries failed deletions up to max_retries times with exponential backoff."""
     # Separate CloudFront distributions from other resources
@@ -209,16 +209,26 @@ def main():
     print(json.dumps(ordered_resources_for_deletion, indent=4, default=str))
 
     print(f"\n{len(ordered_resources_for_deletion)} resources queued for deletion. \n")
+
+    # Figure out how to make this clearer
     delete = input("Are you sure you want to delete all of these resources? (y/n): \n")
+    prompt = input("Do you want to be prompted before deleting each resource? Selecting 'n' will delete all resources automatically. (y/n): \n")
 
     if delete.lower() != 'y':
         print("Exiting...")
         return
 
-    print("Deleting resources... \n")
     failed_deletions = []
 
     for resource in ordered_resources_for_deletion:
+        resource_name = resource.get('arn') or resource.get('resource_id')
+
+        if prompt.lower() == 'y':
+            confirm = input(f"\nDo you want to delete the following resource?\n{json.dumps(resource, indent=4, default=str )}\n[y/n]?: ")
+            if confirm.lower() != 'y':
+                print(f"Skipping deletion of {resource_name}")
+                continue
+
         failed_deletion = delete_resource(resource)
         if failed_deletion:
             failed_deletions.append(failed_deletion)
