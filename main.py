@@ -3,9 +3,8 @@ import time
 import boto3
 import botocore.exceptions
 from delete_functions import DELETE_FUNCTIONS, disable_cloudfront_distribution, wait_for_distribution_disabled, delete_cloudfront_distribution
+import get_other_ids
 
-# TODO Build in logic to place autoscaling group before loadbalancer in deletion order
-# Also need to figure out a way to delete target groups for loadbalancers
 
 def get_resources_by_tag(tag_key, tag_value):
     '''' Gets list of resources by common tag key and value. '''
@@ -57,6 +56,18 @@ def get_resources_by_tag(tag_key, tag_value):
     return resources
 
 
+def get_other_resources(tag_key, tag_value):
+    '''
+    Gets other resources that are not present when using the 'resource-groups' client.
+    '''
+
+    resources = []
+    images_and_snapshots = get_other_ids.get_images(tag_key, tag_value)
+    resources.extend(images_and_snapshots)
+
+    return resources
+
+
 def parse_resource_by_type(resource):
     """Parses resource type, service and ARN from each resource to find the appropriate delete function."""
     arn = resource['ResourceArn']
@@ -76,9 +87,11 @@ def order_resources_for_deletion(resources):
     # Other resources that must follow a particlar deletion order
     ordered_non_networking_resources = [resource for resource in resources if "ec2" not in resource["service"]]
     non_ordered_resources = [resource for resource in ordered_non_networking_resources if resource["service"] not in ["elasticloadbalancingv2", "autoscaling"]]
+    other_resources = [resource for resource in resources if resource.get("resource_id")]
 
     ordered_resources = []
     ordered_resources.extend([resource for resource in non_ordered_resources])
+    ordered_resources.extend([resource for resource in other_resources])
     ordered_resources.extend([resource for resource in ordered_non_networking_resources if "autoscaling" in resource["service"]])
     ordered_resources.extend([resource for resource in ordered_non_networking_resources if "elasticloadbalancingv2" in resource["service"]])
     ordered_resources.extend([resource for resource in networking_resources if "instance" in resource["resource_type"]])
@@ -97,7 +110,7 @@ def delete_resource(resource):
     """Finds and calls the appropriate delete function based on the resource type."""
     service = resource['service']
     resource_type = resource['resource_type']
-    arn = resource['arn']
+    arn = resource.get('arn') or resource.get('resource_id')
 
     # print(f"DEBUG: Checking DELETE_FUNCTIONS for service='{service}', resource_type='{resource_type}'")
 
@@ -167,7 +180,7 @@ def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
                     print(f"Fail from retry function: Failed to delete {resource['arn']}")
 
         if not new_failed_resources:
-            print("All non-CloudFront resources were successfully deleted.")
+            print("All resources were successfully deleted.")
             return
 
         other_resources = new_failed_resources
@@ -190,6 +203,8 @@ def main():
         resource_for_deletion = parse_resource_by_type(resource)
         resources_for_deletion.append(resource_for_deletion)
 
+    other_resources_for_deletion = get_other_resources(tag_key, tag_value)
+    resources_for_deletion.extend(other_resources_for_deletion)
     ordered_resources_for_deletion = order_resources_for_deletion(resources_for_deletion)
     print(json.dumps(ordered_resources_for_deletion, indent=4, default=str))
 

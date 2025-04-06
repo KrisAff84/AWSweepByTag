@@ -13,6 +13,10 @@ import boto3
 
 ######################### API GW Services ###########################
 
+# TODO: Need to handle VPC Links as well
+# For REST APIS get_resources -> get_method (for each method and resource) -> MethodIntegration -> connectionId if connectionType = "VPC_LINK"
+# For HTTP & Websocket APIs get_integrations -> connectionId if connectionType == "VPC_LINK"
+
 def delete_api(arn):
     '''
     Handles HTTP APIs and Websocket APIs.
@@ -139,22 +143,47 @@ def wait_for_distribution_disabled(arn):
 
 ########################### EC2 Service #############################
 
+def deregister_ami(arn):
+    client = boto3.client('ec2')
+    response = client.deregister_image(ImageId=arn)
+    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+        print(f"AMI {arn} was successfully deregistered")
+    else:
+        print(f"AMI {arn} was not successfully deregistered")
+    print(json.dumps(response, indent=4, default=str))
+
+
 def delete_ec2_instance(arn):
     client = boto3.client('ec2')
     instance_id = arn.split('/')[-1]
-    instance_status = client.describe_instances(InstanceIds=[instance_id])['Reservations'][0]['Instances'][0]['State']['Name']
+
+    try:
+        response = client.describe_instances(InstanceIds=[instance_id])
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', '')
+        if error_code == 'InvalidInstanceID.NotFound':
+            print(f"EC2 instance {instance_id} not found. It may have already been terminated.")
+            return
+        else:
+            print(f"Error describing EC2 instance {instance_id}: {e}")
+            raise
+
+    if not response['Reservations']:
+        print(f"EC2 instance {instance_id} not found in reservations. It may already be terminated.")
+        return
+
+    instance_status = response['Reservations'][0]['Instances'][0]['State']['Name']
 
     if instance_status in ['terminated', 'shutting-down']:
-        print(f"Current status of EC@ instance {instance_id} is: {instance_status}. Skipping")
+        print(f"Current status of EC2 instance {instance_id} is: {instance_status}. Skipping.")
         return
-    else:
-        response = client.terminate_instances(InstanceIds=[instance_id])
-        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-            print(f"EC2 instance {instance_id} was successfully terminated")
-        else:
-            print(f"EC2 instance {instance_id} was not successfully terminated")
-        print(json.dumps(response, indent=4, default=str))
 
+    response = client.terminate_instances(InstanceIds=[instance_id])
+    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+        print(f"EC2 instance {instance_id} was successfully terminated.")
+    else:
+        print(f"EC2 instance {instance_id} was not successfully terminated.")
+    print(json.dumps(response, indent=4, default=str))
 
 def release_eip(arn):
     client = boto3.client('ec2')
@@ -235,6 +264,16 @@ def delete_route_table(arn):
     print(json.dumps(response, indent=4, default=str))
 
 
+def delete_snapshot(arn):
+    client = boto3.client('ec2')
+    response = client.delete_snapshot(SnapshotId=arn)
+    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+        print(f"Snapshot {arn} was successfully deleted")
+    else:
+        print(f"Snapshot {arn} was not successfully deleted")
+    print(json.dumps(response, indent=4, default=str))
+
+
 def delete_subnet(arn):
     client = boto3.client('ec2')
     subnet_id = arn.split('/')[-1]
@@ -277,7 +316,23 @@ def delete_vpc_endpoint(arn):
 def delete_vpc(arn):
     client = boto3.client('ec2')
     vpc_id = arn.split('/')[-1]
+    print((f"Checking VPC {vpc_id} for security groups...\n"))
+    response = client.describe_security_groups(Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}])
+    security_groups = response['SecurityGroups']
+    for sg in security_groups:
+        if sg['GroupName'] == 'default':
+            continue
+        sg_id = sg['GroupId']
+        print(f"Deleting security group {sg_id}...\n")
+        response = client.delete_security_group(GroupId=sg_id)
+        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+            print(f"Security group {sg_id} was successfully deleted")
+        else:
+            print(f"Security group {sg_id} was not successfully deleted")
+        print(json.dumps(response, indent=4, default=str))
+
     response = client.delete_vpc(VpcId=vpc_id)
+    print(f"Deleting VPC {vpc_id}...\n")
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
         print(f"VPC {vpc_id} was successfully deleted")
     else:
@@ -443,6 +498,7 @@ DELETE_FUNCTIONS = {
         'table': lambda resource: print("deleting table"),  # delete_table(resource['arn'])
     },
     'ec2': {
+        'ami': deregister_ami,
         'eip': release_eip,
         'instance': delete_ec2_instance,
         'internetgateway': delete_internet_gateway,
@@ -450,6 +506,7 @@ DELETE_FUNCTIONS = {
         'route': lambda resource: print("deleting route"),  # delete_route(resource['arn'])
         'routetable': delete_route_table,
         'security_group': lambda resource: print("deleting security group"),  # delete_security_group(resource['arn'])
+        'snapshot': delete_snapshot,
         'subnet': delete_subnet,
         'transitgatewayattachment': lambda resource: print("deleting transit gateway attachment"),  # delete_transit_gateway_vpc_attachment(resource['arn'])
         'vpc': delete_vpc,
