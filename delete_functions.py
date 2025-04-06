@@ -236,10 +236,10 @@ def delete_nat_gateway(arn):
         print(f"Nat gateway {nat_gateway_id} was already deleted")
         return
     try:
-        client.delete_nat_gateway(NatGatewayId=nat_gateway_id)
+        response = client.delete_nat_gateway(NatGatewayId=nat_gateway_id)
         print(f"Nat gateway {nat_gateway_id} deletion initiated")
         print("Waiting for NAT Gateway to complete deletion process...")
-        nat_deleted= client.get_waiter('nat_gateway_deleted')
+        nat_deleted = client.get_waiter('nat_gateway_deleted')
         nat_deleted.wait(
             NatGatewayIds=[nat_gateway_id],
             WaiterConfig={
@@ -248,6 +248,7 @@ def delete_nat_gateway(arn):
             }
         )
         print(f"Nat gateway {nat_gateway_id} has been fully deleted")
+        print(json.dumps(response, indent=4, default=str))
     except Exception as e:
         print(f"Nat gateway {nat_gateway_id} was not fully deleted: {e}")
         return
