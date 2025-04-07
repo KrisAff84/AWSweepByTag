@@ -141,6 +141,58 @@ def wait_for_distribution_disabled(arn):
     )
     print(f"CloudFront distribution {distribution_id} disabled.")
 
+######################## DynamoDB Service ###########################
+
+def delete_dynamodb_table(arn):
+    """
+    Deletes a DynamoDB table. If the table has deletion protection or items,
+    the user will be prompted before proceeding.
+    """
+    client = boto3.client('dynamodb')
+    table_name = arn.split('/')[-1]
+
+    # Check for deletion protection
+    try:
+        table_info = client.describe_table(TableName=table_name)['Table']
+    except client.exceptions.ResourceNotFoundException:
+        print(f"Table {table_name} does not exist.")
+        return
+
+    deletion_protection = table_info.get('DeletionProtectionEnabled', False)
+    if deletion_protection:
+        disable_protection = input(
+            f"Table {table_name} has deletion protection enabled. Disable it? (y/n): "
+        ).strip().lower()
+        if disable_protection != 'y':
+            print(f"Skipping deletion of DynamoDB table {table_name}")
+            return
+
+        # Disable deletion protection
+        response = client.update_table(
+            TableName=table_name,
+            DeletionProtectionEnabled=False
+        )
+        print(f"Deletion protection disabled for table {table_name}")
+        print(json.dumps(response, indent=4, default=str))
+
+    # Check if table has items
+    response = client.scan(TableName=table_name, Limit=1)
+    if len(response.get('Items', [])) > 0:
+        confirm = input(
+            f"Table {table_name} is not empty. Delete all items and the table? (y/n): "
+        ).strip().lower()
+        if confirm != 'y':
+            print(f"Skipping deletion of DynamoDB table {table_name}")
+            return
+
+    # Delete the table
+    response = client.delete_table(TableName=table_name)
+    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+        print(f"DynamoDB table {table_name} was successfully deleted")
+    else:
+        print(f"DynamoDB table {table_name} was not successfully deleted")
+    print(json.dumps(response, indent=4, default=str))
+
 ########################### EC2 Service #############################
 
 def deregister_ami(arn):
@@ -496,7 +548,7 @@ DELETE_FUNCTIONS = {
         'distribution': delete_cloudfront_distribution,  # delete_distribution(resource['arn'])
     },
     'dynamodb': {
-        'table': lambda resource: print("deleting table"),  # delete_table(resource['arn'])
+        'table': delete_dynamodb_table
     },
     'ec2': {
         'ami': deregister_ami,
