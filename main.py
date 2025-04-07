@@ -231,8 +231,8 @@ def main():
         print("Exiting...")
         return
 
-    prompt = input("Do you want to be prompted before deleting each resource? Selecting 'n' will delete all resources automatically. (y/n): \n")
-
+    prompt = input("Do you want to be prompted before deleting each resource? Selecting 'n' will delete all resources automatically. (y/n): ")
+    print()
 
     failed_deletions = []
 

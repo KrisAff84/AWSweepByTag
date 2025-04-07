@@ -515,7 +515,7 @@ def delete_subnet(arn):
         for rt in route_tables
         for assoc in rt.get("Associations", [])
         if assoc.get("SubnetId") == subnet_id
-]
+    ]
 
     # Disassociate route tables from subnet if they are associated
     if associations:
@@ -530,6 +530,23 @@ def delete_subnet(arn):
             else:
                 print(f"\nRoute table {rt['route_table_id']} was not successfully disassociated from subnet {subnet_id}")
             print(json.dumps(response, indent=4, default=str))
+
+    # # Check for any ENIs in the subnet
+    # enis = client.describe_network_interfaces(Filters=[{'Name': 'subnet-id', 'Values': [subnet_id]}])['NetworkInterfaces']
+    # interface_enis = [eni for eni in enis if eni["InterfaceType"] == "interface"]
+    # if interface_enis:
+    #     print(f"Subnet {subnet_id} contains the following Elastic Network Interfaces (ENIs):\n")
+    #     for eni in interface_enis:
+    #         print(eni['NetworkInterfaceId'])
+    #     print(f"\nDetaching ENIs from subnet {subnet_id}...")
+    #     for eni in interface_enis:
+    #         response = client.detach_network_interface(AttachmentId=eni['Attachment']['AttachmentId'], Force=True)
+    #         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+    #             print(f"\nENI {eni['NetworkInterfaceId']} was successfully detached from subnet {subnet_id}")
+    #         else:
+    #             print(f"\nENI {eni['NetworkInterfaceId']} was not successfully detached from subnet {subnet_id}")
+    #         print(json.dumps(response, indent=4, default=str))
+
 
     # Delete subnet
     response = client.delete_subnet(SubnetId=subnet_id)
@@ -601,8 +618,10 @@ def delete_elastic_load_balancer(arn):
     '''
     Deletes ELB as well as any listeners and target groups.
     '''
+    print(f"Deleting ELB {arn}...\n")
     client = boto3.client('elbv2')
 
+    print("Checking ELB for listeners and target groups...\n")
     response = client.describe_listeners(LoadBalancerArn=arn)
     listeners = response['Listeners']
     listener_arns = [listener['ListenerArn'] for listener in listeners]
@@ -615,7 +634,7 @@ def delete_elastic_load_balancer(arn):
                 for tg in forward_config.get("TargetGroups", []):
                     target_group_arns.add(tg['TargetGroupArn'])
 
-    # Delete listeners - eventually needs to be modified to handle multiple listeners
+    # Delete listeners
     for listener in listener_arns:
         response = client.delete_listener(ListenerArn=listener)
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -624,7 +643,7 @@ def delete_elastic_load_balancer(arn):
             print(f"Listener {listener} was not successfully deleted")
         print(json.dumps(response, indent=4, default=str))
 
-    # Delete target group - eventually needs to be modified to handle multiple target groups
+    # Delete target groups
     for tg in target_group_arns:
         response = client.delete_target_group(TargetGroupArn=tg)
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -636,10 +655,22 @@ def delete_elastic_load_balancer(arn):
     # Delete load balancer
     response = client.delete_load_balancer(LoadBalancerArn=arn)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        print(f"Load balancer {arn} was successfully deleted")
+        print(f"Deletion of load balancer {arn} was successfully initiated")
     else:
-        print(f"Load balancer {arn} was not successfully deleted")
+        print(f"Deletion of load balancer {arn} was not successfully initiated")
     print(json.dumps(response, indent=4, default=str))
+
+    # Check to make sure load balancer is fully deleted
+    print(f"\nWaiting for ELB {arn} to be fully deleted...")
+    load_balancer_deleted = client.get_waiter('load_balancers_deleted')
+    try:
+        load_balancer_deleted.wait(
+            LoadBalancerArns=[arn],
+            WaiterConfig={'Delay': 10, 'MaxAttempts': 12}
+        )
+        print(f"Load balancer {arn} has been fully deleted")
+    except botocore.exceptions.WaiterError as e:
+        print(f"Load balancer {arn} has not been fully deleted: {e}")
 
 ########################### IAM Service #############################
 
