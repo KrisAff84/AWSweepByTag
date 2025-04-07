@@ -405,6 +405,7 @@ def delete_ec2_instance(arn):
         print(f"EC2 instance {instance_id} was not successfully terminated.")
     print(json.dumps(response, indent=4, default=str))
 
+
 def release_eip(arn):
     client = boto3.client('ec2')
     allocation_id = arn.split('/')[-1]
@@ -477,6 +478,7 @@ def delete_nat_gateway(arn):
 def delete_route_table(arn):
     client = boto3.client('ec2')
     route_table_id = arn.split('/')[-1]
+
     response = client.delete_route_table(RouteTableId=route_table_id)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
         print(f"Route table {route_table_id} was successfully deleted")
@@ -495,9 +497,41 @@ def delete_snapshot(arn):
     print(json.dumps(response, indent=4, default=str))
 
 
+# TODO: Add a check for hanging ENIs
 def delete_subnet(arn):
     client = boto3.client('ec2')
     subnet_id = arn.split('/')[-1]
+
+    print(f"Deleting subnet {subnet_id}...\n")
+
+    # Find any route tables associated with the subnet and detach them
+    print("Looking for associated route tables...\n")
+    route_tables = client.describe_route_tables(Filters=[{'Name': 'association.subnet-id', 'Values': [subnet_id]}])['RouteTables']
+    associations = [
+        {
+            "route_table_id": rt["RouteTableId"],
+            "association_id": assoc["RouteTableAssociationId"]
+        }
+        for rt in route_tables
+        for assoc in rt.get("Associations", [])
+        if assoc.get("SubnetId") == subnet_id
+]
+
+    # Disassociate route tables from subnet if they are associated
+    if associations:
+        print(f"Route tables associated with subnet {subnet_id}:\n")
+        for rt in associations:
+            print(rt['route_table_id'])
+        print(f"\nDisassociating route tables from subnet {subnet_id}...")
+        for rt in associations:
+            response = client.disassociate_route_table(AssociationId=rt['association_id'])
+            if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+                print(f"\nRoute table {rt['route_table_id']} was successfully disassociated from subnet {subnet_id}")
+            else:
+                print(f"\nRoute table {rt['route_table_id']} was not successfully disassociated from subnet {subnet_id}")
+            print(json.dumps(response, indent=4, default=str))
+
+    # Delete subnet
     response = client.delete_subnet(SubnetId=subnet_id)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
         print(f"Subnet {subnet_id} was successfully deleted")
@@ -609,7 +643,6 @@ def delete_elastic_load_balancer(arn):
 
 ########################### IAM Service #############################
 
-
 ######################### Lambda Service ############################
 
 def delete_lambda_function(arn):
@@ -680,7 +713,6 @@ def delete_s3_bucket(arn):
         print(f"Bucket '{bucket_name}' does not exist.")
     except Exception as e:
         print(f"Error deleting S3 bucket '{bucket_name}': {e}")
-
 
 ########################## SQS Service ##############################
 
