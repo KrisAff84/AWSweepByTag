@@ -1,3 +1,7 @@
+'''
+Gets IDs from resources that do not show up when using the 'resource-groups' client.
+'''
+
 # import json
 import boto3
 

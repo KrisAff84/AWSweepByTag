@@ -212,11 +212,13 @@ def main():
 
     # Figure out how to make this clearer
     delete = input("Are you sure you want to delete all of these resources? (y/n): \n")
-    prompt = input("Do you want to be prompted before deleting each resource? Selecting 'n' will delete all resources automatically. (y/n): \n")
 
     if delete.lower() != 'y':
         print("Exiting...")
         return
+
+    prompt = input("Do you want to be prompted before deleting each resource? Selecting 'n' will delete all resources automatically. (y/n): \n")
+
 
     failed_deletions = []
 

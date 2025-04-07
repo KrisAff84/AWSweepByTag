@@ -3,6 +3,7 @@ Contains the delete functions as well as the DELETE_FUNCTIONS dictionary, which 
 to the appropriate individual delete function.
 '''
 
+import time
 import json
 import botocore.exceptions
 import boto3
@@ -13,33 +14,200 @@ import boto3
 
 ######################### API GW Services ###########################
 
-# TODO: Need to handle VPC Links as well
-# For REST APIS get_resources -> get_method (for each method and resource) -> MethodIntegration -> connectionId if connectionType = "VPC_LINK"
-# For HTTP & Websocket APIs get_integrations -> connectionId if connectionType == "VPC_LINK"
-
+# This has been tested and works. The same logic needs to be updated for the REST API function.
 def delete_api(arn):
     '''
-    Handles HTTP APIs and Websocket APIs.
+    Handles HTTP APIs and WebSocket APIs. Checks for any associated VPC links and optionally deletes them.
+    If VPC links exist and are deleted, the function waits for them to become inactive or non-existent before proceeding.
     '''
     client = boto3.client('apigatewayv2')
     api_id = arn.split('/')[-1]
-    response = client.delete_api(ApiId=api_id)
-    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        print(f"HTTP API {arn} was successfully deleted")
+
+    # Gather any integrations using VPC_LINK
+    integrations = client.get_integrations(ApiId=api_id)
+    vpc_link_ids = []
+
+    for integration in integrations.get('Items', []):
+        if integration.get('ConnectionType') == 'VPC_LINK':
+            conn_id = integration.get('ConnectionId')
+            if conn_id:
+                vpc_link_ids.append(conn_id)
+
+    # Delete the API
+    try:
+        response = client.delete_api(ApiId=api_id)
+        status_code = response['ResponseMetadata']['HTTPStatusCode']
+        if 200 <= status_code < 300:
+            print(f"HTTP API {arn} was successfully deleted")
+        else:
+            print(f"HTTP API {arn} was not successfully deleted")
+        print(json.dumps(response, indent=4, default=str))
+    except botocore.exceptions.ClientError as e:
+        print(f"Failed to delete API {arn}: {e}")
+
+    # Ask if user wants to delete associated VPC links if there are any
+    delete_vpc_links = 'n'
+    if vpc_link_ids:
+        delete_vpc_links = input(f"Found {len(vpc_link_ids)} VPC link(s) associated with API {arn}. Delete them? (y/n): ").strip().lower()
+        if delete_vpc_links != 'y':
+            print("VPC links will not be deleted.")
+            return
+        else:
+            for vpc_link_id in vpc_link_ids:
+                try:
+                    response = client.delete_vpc_link(VpcLinkId=vpc_link_id)
+                    status_code = response['ResponseMetadata']['HTTPStatusCode']
+                    if 200 <= status_code < 300:
+                        print(f"VPC link {vpc_link_id} was successfully deleted")
+                    else:
+                        print(f"VPC link {vpc_link_id} was not successfully deleted")
+                    print(json.dumps(response, indent=4, default=str))
+                except botocore.exceptions.ClientError as e:
+                    print(f"Error deleting VPC link {vpc_link_id}: {e}")
+
+    # Exit if no VPC links were found
     else:
-        print(f"HTTP API {arn} was not successfully deleted")
-    print(json.dumps(response, indent=4, default=str))
+        return
 
+    # Wait for VPC links to become inactive (avoid dependency issues)
+    if vpc_link_ids and delete_vpc_links == 'y':
+        print("Checking status(es) of VPC link(s) to avoid dependency violations...\n")
+        max_retries = 5
+        retry_delay = 5
+        retry = 0
 
+        while retry <= max_retries:
+            vpc_link_statuses = []
+            all_inactive = True
+
+            for vpc_link_id in vpc_link_ids:
+                try:
+                    response = client.get_vpc_link(VpcLinkId=vpc_link_id)
+                    if 'VpcLink' in response:
+                        status = response['VpcLink']['VpcLinkStatus']
+                    else:
+                        status = response.get('VpcLinkStatus') or response.get('status')  # fallback
+                    vpc_link_statuses.append((vpc_link_id, status))
+                    if status in ('DELETING', 'PENDING', 'AVAILABLE'):
+                        all_inactive = False
+                except botocore.exceptions.ClientError as e:
+                    if e.response['Error']['Code'] == 'NotFoundException':
+                        print(f"VPC link {vpc_link_id} is already deleted.")
+                    else:
+                        print(f"Error checking status for VPC link {vpc_link_id}: {e}")
+                        all_inactive = False
+
+            if all_inactive:
+                print("All VPC links are inactive or deleted.")
+                break
+            else:
+                print("Some VPC links are still active:")
+                for vpc_link_id, status in vpc_link_statuses:
+                    print(f"  - {vpc_link_id}: {status}")
+                print(f"Retrying in {retry_delay} seconds...\n")
+                time.sleep(retry_delay)
+                retry += 1
+
+        if retry > max_retries:
+            print("Some VPC links may still be active. Please check manually.")
+
+# TODO: This still needs to be tested.
 def delete_rest_api(arn):
+    '''
+    Handles REST APIs. Checks for any associated VPC links and optionally deletes them.
+    If VPC links exist and are deleted, the function waits for them to become fully deleted before proceeding.
+    '''
     client = boto3.client('apigateway')
     api_id = arn.split('/')[-1]
-    response = client.delete_rest_api(restApiId=api_id)
-    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        print(f"REST API {arn} was successfully deleted")
-    else:
-        print(f"REST API {arn} was not successfully deleted")
-    print(json.dumps(response, indent=4, default=str))
+    vpc_link_ids = set()
+
+    # Checks for VPC Links in method integrations
+    resources = client.get_resources(restApiId=api_id, limit=500)
+
+    for resource in resources['items']:
+        resource_id = resource['id']
+        if 'resourceMethods' in resource:
+            for http_method in resource['resourceMethods']:
+                try:
+                    method_resp = client.get_integration(
+                        restApiId=api_id,
+                        resourceId=resource_id,
+                        httpMethod=http_method
+                    )
+                    if method_resp.get('connectionType') == 'VPC_LINK':
+                        conn_id = method_resp.get('connectionId')
+                        if conn_id:
+                            vpc_link_ids.add(conn_id)
+                except botocore.exceptions.ClientError as e:
+                    print(f"Error retrieving integration for {http_method} on resource {resource_id}: {e}")
+
+    # Prompts user to delete VPC links if they exist.
+    if vpc_link_ids:
+        delete_vpc_links = 'n'
+        delete_vpc_links = input(f"Found {len(vpc_link_ids)} VPC link(s) associated with REST API {arn}. Delete them? (y/n): ").strip().lower()
+        if delete_vpc_links != 'y':
+            print("VPC links will not be deleted.")
+        else:
+            # Deletes VPC links if user confirms
+            for vpc_link_id in vpc_link_ids:
+                try:
+                    response = client.delete_vpc_link(VpcLinkId=vpc_link_id)
+                    status_code = response['ResponseMetadata']['HTTPStatusCode']
+                    if 200 <= status_code < 300:
+                        print(f"VPC link {vpc_link_id} was successfully deleted")
+                    else:
+                        print(f"VPC link {vpc_link_id} was not successfully deleted")
+                    print(json.dumps(response, indent=4, default=str))
+                except botocore.exceptions.ClientError as e:
+                    print(f"Error deleting VPC link {vpc_link_id}: {e}")
+
+    # Deletes the REST API
+    try:
+        response = client.delete_rest_api(ApiId=api_id)
+        status_code = response['ResponseMetadata']['HTTPStatusCode']
+        if 200 <= status_code < 300:
+            print(f"HTTP API {arn} was successfully deleted")
+        else:
+            print(f"HTTP API {arn} was not successfully deleted")
+        print(json.dumps(response, indent=4, default=str))
+    except botocore.exceptions.ClientError as e:
+        print(f"Failed to delete API {arn}: {e}")
+
+    # Wait for VPC links to be deleted or reach a non-active state
+    if vpc_link_ids and delete_vpc_links == 'y':
+        print("Checking status(es) of VPC link(s) to avoid dependency violations...\n")
+        max_retries = 5
+        retry_delay = 5
+        retry = 0
+
+        while retry <= max_retries:
+            still_exists = []
+
+            for vpc_link_id in vpc_link_ids:
+                try:
+                    response = client.get_vpc_link(vpcLinkId=vpc_link_id)
+                    status = response.get('status', '')
+                    print(f"VPC link {vpc_link_id} status: {status}")
+                    still_exists.append((vpc_link_id, status))
+                except botocore.exceptions.ClientError as e:
+                    if e.response['Error']['Code'] == 'NotFoundException':
+                        print(f"VPC link {vpc_link_id} has been fully deleted.")
+                        continue
+                    else:
+                        print(f"Error checking status for VPC link {vpc_link_id}: {e}")
+                        still_exists.append((vpc_link_id, 'ERROR'))
+
+            if not still_exists:
+                print("All VPC links have been fully deleted.")
+                break
+            else:
+                print("Waiting for VPC links to be fully deleted...")
+                retry += 1
+                time.sleep(retry_delay)
+
+        if retry >= max_retries:
+            print("Some VPC links may still exist. Please check manually.")
+
 
 ####################### AutoScaling Service #########################
 
