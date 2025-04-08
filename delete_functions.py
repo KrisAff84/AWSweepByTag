@@ -20,6 +20,7 @@ def delete_api(arn):
     Handles HTTP APIs and WebSocket APIs. Checks for any associated VPC links and optionally deletes them.
     If VPC links exist and are deleted, the function waits for them to become inactive or non-existent before proceeding.
     '''
+    print(f"Deleting HTTP API {arn}...\n")
     client = boto3.client('apigatewayv2')
     api_id = arn.split('/')[-1]
 
@@ -42,15 +43,18 @@ def delete_api(arn):
         else:
             print(f"HTTP API {arn} was not successfully deleted")
         print(json.dumps(response, indent=4, default=str))
+        print()
     except botocore.exceptions.ClientError as e:
-        print(f"Failed to delete API {arn}: {e}")
+        print(f"Failed to delete API {arn}: {e}\n")
 
+    print()
     # Ask if user wants to delete associated VPC links if there are any
     delete_vpc_links = 'n'
     if vpc_link_ids:
         delete_vpc_links = input(f"Found {len(vpc_link_ids)} VPC link(s) associated with API {arn}. Delete them? (y/n): ").strip().lower()
+        print()
         if delete_vpc_links != 'y':
-            print("VPC links will not be deleted.")
+            print("VPC links will not be deleted")
             return
         else:
             for vpc_link_id in vpc_link_ids:
@@ -62,13 +66,15 @@ def delete_api(arn):
                     else:
                         print(f"VPC link {vpc_link_id} was not successfully deleted")
                     print(json.dumps(response, indent=4, default=str))
+                    print()
                 except botocore.exceptions.ClientError as e:
-                    print(f"Error deleting VPC link {vpc_link_id}: {e}")
+                    print(f"Error deleting VPC link {vpc_link_id}: {e}\n")
 
     # Exit if no VPC links were found
     else:
         return
 
+    print()
     # Wait for VPC links to become inactive (avoid dependency issues)
     if vpc_link_ids and delete_vpc_links == 'y':
         print("Checking status(es) of VPC link(s) to avoid dependency violations...\n")
@@ -92,24 +98,25 @@ def delete_api(arn):
                         all_inactive = False
                 except botocore.exceptions.ClientError as e:
                     if e.response['Error']['Code'] == 'NotFoundException':
-                        print(f"VPC link {vpc_link_id} is already deleted.")
+                        print(f"VPC link {vpc_link_id} is already deleted")
                     else:
                         print(f"Error checking status for VPC link {vpc_link_id}: {e}")
                         all_inactive = False
 
             if all_inactive:
-                print("All VPC links are inactive or deleted.")
+                print("All VPC links are inactive or deleted")
                 break
             else:
                 print("Some VPC links are still active:")
                 for vpc_link_id, status in vpc_link_statuses:
                     print(f"  - {vpc_link_id}: {status}")
-                print(f"Retrying in {retry_delay} seconds...\n")
+                print(f"Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
                 retry += 1
 
         if retry > max_retries:
-            print("Some VPC links may still be active. Please check manually.")
+            print("Some VPC links may still be active. Please check manually")
+    print()
 
 # TODO: This still needs to be tested.
 def delete_rest_api(arn):
@@ -212,6 +219,7 @@ def delete_rest_api(arn):
 ####################### AutoScaling Service #########################
 
 def delete_autoscaling_group(arn):
+    print(f"Deleting autoscaling group {arn}...\n")
     client = boto3.client('autoscaling')
     asg_name = arn.split('/')[-1]
     response = client.delete_auto_scaling_group(AutoScalingGroupName=asg_name, ForceDelete=True)
@@ -220,12 +228,14 @@ def delete_autoscaling_group(arn):
     else:
         print(f"Autoscaling group {arn} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
+    print()
 
 ####################### CloudFront Service ##########################
 
 def delete_cloudfront_distribution(arn):
     client = boto3.client('cloudfront')
     distribution_id = arn.split('/')[-1]
+    print(f"Deleting CloudFront distribution {distribution_id}...\n")
 
     # Get the new ETag after disable
     distribution = client.get_distribution(Id=distribution_id)
@@ -247,10 +257,13 @@ def delete_cloudfront_distribution(arn):
     except Exception as e:
         print(f"Error deleting distribution {distribution_id}: {str(e)}")
 
+    print()
+
 
 def disable_cloudfront_distribution(arn):
     client = boto3.client('cloudfront')
     distribution_id = arn.split('/')[-1]
+    print(f"Disabling CloudFront distribution {distribution_id}...\n")
      # Get the current distribution config
     distribution = client.get_distribution(Id=distribution_id)
     etag = distribution['ETag']
@@ -264,7 +277,7 @@ def disable_cloudfront_distribution(arn):
         config['Enabled'] = False
 
         # Update the distribution to disable it
-        print(f"Disabling CloudFront distribution {distribution_id}. Will come back to delete.")
+        print(f"Disabling CloudFront distribution {distribution_id}. Will come back to delete...")
         client.update_distribution(
             Id=distribution_id,
             DistributionConfig=config,
@@ -273,7 +286,7 @@ def disable_cloudfront_distribution(arn):
         retry = True
 
     else:
-        print(f"CloudFront distribution {distribution_id} is already disabled.")
+        print(f"CloudFront distribution {distribution_id} is already disabled. Trying to delete...")
         try:
             response = client.delete_distribution(
                 Id=distribution_id,
@@ -286,12 +299,13 @@ def disable_cloudfront_distribution(arn):
                 print(f"CloudFront distribution {arn} was not successfully deleted")
             print(json.dumps(response, indent=4, default=str))
         except client.exceptions.DistributionNotDisabled:
-            print(f"CloudFront distribution {distribution_id} is not yet fully disabled. Will retry later.")
+            print(f"CloudFront distribution {distribution_id} is not yet fully disabled. Will retry later...")
             retry = True
         except Exception as e:
             print(f"Error deleting CloudFront distribution {distribution_id}: {str(e)}")
             retry = True
 
+    print()
     return retry
 
 
@@ -308,6 +322,7 @@ def wait_for_distribution_disabled(arn):
         }
     )
     print(f"CloudFront distribution {distribution_id} disabled.")
+    print()
 
 ######################## DynamoDB Service ###########################
 
@@ -316,6 +331,7 @@ def delete_dynamodb_table(arn):
     Deletes a DynamoDB table. If the table has deletion protection or items,
     the user will be prompted before proceeding.
     """
+    print(f"Deleting DynamoDB table {arn}...\n")
     client = boto3.client('dynamodb')
     table_name = arn.split('/')[-1]
 
@@ -323,15 +339,15 @@ def delete_dynamodb_table(arn):
     try:
         table_info = client.describe_table(TableName=table_name)['Table']
     except client.exceptions.ResourceNotFoundException:
-        print(f"Table {table_name} does not exist.")
+        print(f"Table {table_name} does not exist. It's possible that it has been deleted already.")
         return
 
     deletion_protection = table_info.get('DeletionProtectionEnabled', False)
     if deletion_protection:
         disable_protection = input(
-            f"Table {table_name} has deletion protection enabled. Disable it? (y/n): "
+            f"\n**** WARNING ****:Table {table_name} has deletion protection enabled. Disable it? (yes/no): "
         ).strip().lower()
-        if disable_protection != 'y':
+        if disable_protection != 'yes':
             print(f"Skipping deletion of DynamoDB table {table_name}")
             return
 
@@ -347,9 +363,9 @@ def delete_dynamodb_table(arn):
     response = client.scan(TableName=table_name, Limit=1)
     if len(response.get('Items', [])) > 0:
         confirm = input(
-            f"Table {table_name} is not empty. Delete all items and the table? (y/n): "
+            f"\n**** WARNING ****: Table {table_name} is not empty. Delete all items and the table? (yes/no): "
         ).strip().lower()
-        if confirm != 'y':
+        if confirm != 'yes':
             print(f"Skipping deletion of DynamoDB table {table_name}")
             return
 
@@ -360,10 +376,12 @@ def delete_dynamodb_table(arn):
     else:
         print(f"DynamoDB table {table_name} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
+    print()
 
 ########################### EC2 Service #############################
 
 def deregister_ami(arn):
+    print(f"Deregistering AMI {arn}...\n")
     client = boto3.client('ec2')
     response = client.deregister_image(ImageId=arn)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -371,11 +389,13 @@ def deregister_ami(arn):
     else:
         print(f"AMI {arn} was not successfully deregistered")
     print(json.dumps(response, indent=4, default=str))
+    print()
 
 
 def delete_ec2_instance(arn):
     client = boto3.client('ec2')
     instance_id = arn.split('/')[-1]
+    print(f"Terminating EC2 instance {instance_id}...\n")
 
     try:
         response = client.describe_instances(InstanceIds=[instance_id])
@@ -389,13 +409,13 @@ def delete_ec2_instance(arn):
             raise
 
     if not response['Reservations']:
-        print(f"EC2 instance {instance_id} not found in reservations. It may already be terminated.")
+        print(f"EC2 instance {instance_id} not found. It may have already been terminated.")
         return
 
     instance_status = response['Reservations'][0]['Instances'][0]['State']['Name']
 
     if instance_status in ['terminated', 'shutting-down']:
-        print(f"Current status of EC2 instance {instance_id} is: {instance_status}. Skipping.")
+        print(f"Current status of EC2 instance {instance_id} is: {instance_status}. Skipping...")
         return
 
     response = client.terminate_instances(InstanceIds=[instance_id])
@@ -404,9 +424,11 @@ def delete_ec2_instance(arn):
     else:
         print(f"EC2 instance {instance_id} was not successfully terminated.")
     print(json.dumps(response, indent=4, default=str))
+    print()
 
 
 def release_eip(arn):
+    print(f"Releasing Elastic IP {arn}...\n")
     client = boto3.client('ec2')
     allocation_id = arn.split('/')[-1]
     response = client.release_address(AllocationId=allocation_id)
@@ -415,13 +437,16 @@ def release_eip(arn):
     else:
         print(f"Elastic IP {allocation_id} was not successfully released")
     print(json.dumps(response, indent=4, default=str))
+    print()
 
 
 def delete_internet_gateway(arn):
     client = boto3.client('ec2')
     gateway_id = arn.split('/')[-1]
+    print(f"Deleting Internet Gateway {gateway_id}...\n")
 
     # Detach Internet Gateway if it is attached to a VPC
+    print("Checking for VPC attachments...")
     try:
         response = client.describe_internet_gateways(InternetGatewayIds=[gateway_id])
         attachments = response.get('InternetGateways', [])[0].get('Attachments', [])
@@ -436,7 +461,10 @@ def delete_internet_gateway(arn):
         print(f"Failed to detach Internet Gateway {gateway_id}, error: {str(e)}")
         return
 
+    print()
+
     # Delete Internet Gateway after it has been detached
+    print("Proceeding with deletion...")
     try:
         response = client.delete_internet_gateway(InternetGatewayId=gateway_id)
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -448,10 +476,13 @@ def delete_internet_gateway(arn):
     except botocore.exceptions.ClientError as e:
         print(f"Failed to delete {gateway_id}: {str(e)}")
 
+    print()
+
 
 def delete_nat_gateway(arn):
     client = boto3.client('ec2')
     nat_gateway_id = arn.split('/')[-1]
+    print(f"Deleting Nat Gateway {nat_gateway_id}...\n")
     deleted = client.describe_nat_gateways(NatGatewayIds=[nat_gateway_id])['NatGateways'][0]['State']
     if deleted == 'deleted' or deleted == 'deleting':
         print(f"Nat gateway {nat_gateway_id} was already deleted")
@@ -474,10 +505,13 @@ def delete_nat_gateway(arn):
         print(f"Nat gateway {nat_gateway_id} was not fully deleted: {e}")
         return
 
+    print()
+
 
 def delete_route_table(arn):
     client = boto3.client('ec2')
     route_table_id = arn.split('/')[-1]
+    print(f"Deleting route table {route_table_id}...\n")
 
     response = client.delete_route_table(RouteTableId=route_table_id)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -486,8 +520,11 @@ def delete_route_table(arn):
         print(f"Route table {route_table_id} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
 
+    print()
+
 
 def delete_snapshot(arn):
+    print(f"Deleting snapshot {arn}...\n")
     client = boto3.client('ec2')
     response = client.delete_snapshot(SnapshotId=arn)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -495,6 +532,8 @@ def delete_snapshot(arn):
     else:
         print(f"Snapshot {arn} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
+
+    print()
 
 
 # TODO: Add a check for hanging ENIs
@@ -526,9 +565,9 @@ def delete_subnet(arn):
         for rt in associations:
             response = client.disassociate_route_table(AssociationId=rt['association_id'])
             if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-                print(f"\nRoute table {rt['route_table_id']} was successfully disassociated from subnet {subnet_id}")
+                print(f"Route table {rt['route_table_id']} was successfully disassociated from subnet {subnet_id}")
             else:
-                print(f"\nRoute table {rt['route_table_id']} was not successfully disassociated from subnet {subnet_id}")
+                print(f"Route table {rt['route_table_id']} was not successfully disassociated from subnet {subnet_id}")
             print(json.dumps(response, indent=4, default=str))
 
     # # Check for any ENIs in the subnet
@@ -549,6 +588,7 @@ def delete_subnet(arn):
 
 
     # Delete subnet
+    print("Initiating subnet deletion...")
     response = client.delete_subnet(SubnetId=subnet_id)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
         print(f"Subnet {subnet_id} was successfully deleted")
@@ -556,10 +596,13 @@ def delete_subnet(arn):
         print(f"Subnet {subnet_id} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
 
+    print()
+
 
 def delete_vpc_endpoint(arn):
     client = boto3.client('ec2')
     endpoint_id = arn.split('/')[-1]
+    print(f"Deleting VPC endpoint {endpoint_id}...\n")
     try:
         response = client.delete_vpc_endpoints(VpcEndpointIds=[endpoint_id])
 
@@ -583,11 +626,13 @@ def delete_vpc_endpoint(arn):
     except botocore.exceptions.ClientError as e:
         print(f"Failed to delete VPC endpoint {endpoint_id}: {str(e)}")
         return None
+    print()
 
 
 def delete_vpc(arn):
     client = boto3.client('ec2')
     vpc_id = arn.split('/')[-1]
+    print(f"Deleting VPC {vpc_id}...\n")
     print((f"Checking VPC {vpc_id} for security groups...\n"))
     response = client.describe_security_groups(Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}])
     security_groups = response['SecurityGroups']
@@ -595,21 +640,25 @@ def delete_vpc(arn):
         if sg['GroupName'] == 'default':
             continue
         sg_id = sg['GroupId']
-        print(f"Deleting security group {sg_id}...\n")
+        print(f"Deleting security group {sg_id}...")
         response = client.delete_security_group(GroupId=sg_id)
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
             print(f"Security group {sg_id} was successfully deleted")
         else:
             print(f"Security group {sg_id} was not successfully deleted")
-        print(json.dumps(response, indent=4, default=str))
+        print(json.dumps(response, indent=4, default=str))\
+
+    print()
 
     response = client.delete_vpc(VpcId=vpc_id)
-    print(f"Deleting VPC {vpc_id}...\n")
+    print("Deleting VPC...")
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
         print(f"VPC {vpc_id} was successfully deleted")
     else:
         print(f"VPC {vpc_id} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
+
+    print()
 
 
 ########################## ELBv2 Service ############################
@@ -617,11 +666,12 @@ def delete_vpc(arn):
 def delete_elastic_load_balancer(arn):
     '''
     Deletes ELB as well as any listeners and target groups.
+    Handles all types of ELBs besides classic.
     '''
     print(f"Deleting ELB {arn}...\n")
     client = boto3.client('elbv2')
 
-    print("Checking ELB for listeners and target groups...\n")
+    print("Checking ELB for listeners and target groups...")
     response = client.describe_listeners(LoadBalancerArn=arn)
     listeners = response['Listeners']
     listener_arns = [listener['ListenerArn'] for listener in listeners]
@@ -643,6 +693,8 @@ def delete_elastic_load_balancer(arn):
             print(f"Listener {listener} was not successfully deleted")
         print(json.dumps(response, indent=4, default=str))
 
+        print()
+
     # Delete target groups
     for tg in target_group_arns:
         response = client.delete_target_group(TargetGroupArn=tg)
@@ -652,7 +704,10 @@ def delete_elastic_load_balancer(arn):
             print(f"Target group {tg} was not successfully deleted")
         print(json.dumps(response, indent=4, default=str))
 
+        print()
+
     # Delete load balancer
+    print("Initiating ELB deletion...")
     response = client.delete_load_balancer(LoadBalancerArn=arn)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
         print(f"Deletion of load balancer {arn} was successfully initiated")
@@ -672,11 +727,14 @@ def delete_elastic_load_balancer(arn):
     except botocore.exceptions.WaiterError as e:
         print(f"Load balancer {arn} has not been fully deleted: {e}")
 
+    print()
+
 ########################### IAM Service #############################
 
 ######################### Lambda Service ############################
 
 def delete_lambda_function(arn):
+    print(f"Deleting Lambda function {arn}...\n")
     client = boto3.client('lambda')
     response = client.delete_function(FunctionName=arn)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -684,6 +742,8 @@ def delete_lambda_function(arn):
     else:
         print(f"Lambda function {arn} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
+
+    print()
 
 ########################### S3 Service ##############################
 
@@ -710,8 +770,8 @@ def delete_s3_bucket(arn):
             has_objects = 'Contents' in response
 
         if has_objects:
-            confirm = input(f"S3 bucket '{bucket_name}' is not empty. Are you sure you want to delete all contents and the bucket? [y/n]: ").strip().lower()
-            if confirm != 'y':
+            confirm = input(f"**** WARNING ****: S3 bucket '{bucket_name}' is not empty. Are you sure you want to delete all contents and the bucket? [yes/no]: ").strip().lower()
+            if confirm != 'yes':
                 print(f"Skipping deletion of bucket '{bucket_name}'.")
                 return
 
@@ -727,6 +787,8 @@ def delete_s3_bucket(arn):
                         objects_to_delete.append({'Key': marker['Key'], 'VersionId': marker['VersionId']})
                     if objects_to_delete:
                         client.delete_objects(Bucket=bucket_name, Delete={'Objects': objects_to_delete})
+
+
             else:
                 paginator = client.get_paginator('list_objects_v2')
                 for page in paginator.paginate(Bucket=bucket_name):
@@ -748,6 +810,7 @@ def delete_s3_bucket(arn):
 ########################## SQS Service ##############################
 
 def delete_sqs_queue(arn):
+    print(f"Deleting SQS queue {arn}...\n")
     client = boto3.client('sqs')
     queue_name = arn.split(':')[-1]
     queue_url = client.get_queue_url(QueueName=queue_name)['QueueUrl']
@@ -757,6 +820,8 @@ def delete_sqs_queue(arn):
     else:
         print(f"SQS queue {arn} was not successfully deleted")
     print(json.dumps(response, indent=4, default=str))
+
+    print()
 
 ###################################################################
 # Delete function mappings

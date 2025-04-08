@@ -225,7 +225,7 @@ def main():
     print(f"\n{len(ordered_resources_for_deletion)} resources queued for deletion. \n")
 
     # Figure out how to make this clearer
-    delete = input("Are you sure you want to delete all of these resources? (y/n): \n")
+    delete = input("Are you sure you want to delete all of these resources? (y/n): ")
 
     if delete.lower() != 'y':
         print("Exiting...")
@@ -241,6 +241,7 @@ def main():
 
         if prompt.lower() == 'y':
             confirm = input(f"\nDo you want to delete the following resource?\n{json.dumps(resource, indent=4, default=str )}\n[y/n]?: ")
+            print()
             if confirm.lower() != 'y':
                 print(f"Skipping deletion of {resource_name}")
                 continue
