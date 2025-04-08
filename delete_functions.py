@@ -786,8 +786,14 @@ def delete_s3_bucket(arn):
                     for marker in page.get('DeleteMarkers', []):
                         objects_to_delete.append({'Key': marker['Key'], 'VersionId': marker['VersionId']})
                     if objects_to_delete:
-                        client.delete_objects(Bucket=bucket_name, Delete={'Objects': objects_to_delete})
-
+                        response = client.delete_objects(Bucket=bucket_name, Delete={'Objects': objects_to_delete})
+                        errors = response.get('Errors', [])
+                        if errors:
+                            print(f"One or more objects in {bucket_name} encountered errors during the deletion process:")
+                            print(json.dumps(errors, indent=4, default=str))
+                            print("Bucket cannot be deleted at this time. Exiting...")
+                            print()
+                            return
 
             else:
                 paginator = client.get_paginator('list_objects_v2')
