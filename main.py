@@ -6,63 +6,69 @@ from delete_functions import DELETE_FUNCTIONS, disable_cloudfront_distribution, 
 import get_other_ids
 
 
-def get_resources_by_tag(tag_key, tag_value):
+def get_resources_by_tag(tag_key, tag_value, regions):
     '''' Gets list of resources by common tag key and value. '''
-    client = boto3.client('resource-groups')
+    resources = []
+    for region in regions:
 
-    query = {
-        "Type": "TAG_FILTERS_1_0",
-        "Query": json.dumps({
-            "ResourceTypeFilters": [
-                "AWS::AllSupported",
-            ],
-            "TagFilters": [
-                {
+        client = boto3.client('resource-groups', region_name=region)
+
+        query = {
+            "Type": "TAG_FILTERS_1_0",
+            "Query": json.dumps({
+                "ResourceTypeFilters": ["AWS::AllSupported"],
+                "TagFilters": [{
                     "Key": tag_key,
                     "Values": [tag_value]
-                }
-            ]
-        })
-    }
-
-    resources = []
-    response = client.search_resources(ResourceQuery=query)
-    while True:
-        resources.extend(response.get('ResourceIdentifiers', []))
-        next_token = response.get('NextToken')
-
-        if not next_token:
-            break
-
-        response = client.search_resources(ResourceQuery=query, NextToken=next_token)
-
-    asgclient = boto3.client('autoscaling')
-    autoscaling_groups = asgclient.describe_auto_scaling_groups(
-        Filters=[
-            {
-                'Name': 'tag:{}'.format(tag_key),
-                'Values': [tag_value]
-            }
-        ]
-    )
-
-    for asg in autoscaling_groups.get("AutoScalingGroups", []):
-        asg_arn = asg["AutoScalingGroupARN"]
-        resource = {
-            "ResourceArn": asg_arn,
-            "ResourceType": "AWS::AutoScaling::AutoScalingGroup",
+                }]
+            })
         }
-        resources.append(resource)
+
+        try:
+            response = client.search_resources(ResourceQuery=query)
+            while True:
+                for res in response.get('ResourceIdentifiers', []):
+                    res['Region'] = region
+                    resources.append(res)
+
+                next_token = response.get('NextToken')
+                if not next_token:
+                    break
+
+                response = client.search_resources(ResourceQuery=query, NextToken=next_token)
+        except botocore.exceptions.ClientError as e:
+            print(f"Error querying resources in region {region}: {e}")
+            continue
+
+        # Autoscaling Groups - handled separately
+        asgclient = boto3.client('autoscaling', region_name=region)
+        try:
+            autoscaling_groups = asgclient.describe_auto_scaling_groups(
+                Filters=[{
+                    'Name': f'tag:{tag_key}',
+                    'Values': [tag_value]
+                }]
+            ).get("AutoScalingGroups", [])
+
+            for asg in autoscaling_groups:
+                resources.append({
+                    "ResourceArn": asg["AutoScalingGroupARN"],
+                    "ResourceType": "AWS::AutoScaling::AutoScalingGroup",
+                    "Region": region
+                })
+        except botocore.exceptions.ClientError as e:
+            print(f"Error querying ASGs in region {region}: {e}")
+
     return resources
 
 
-def get_other_resources(tag_key, tag_value):
+def get_other_resources(tag_key, tag_value, regions):
     '''
     Gets other resources that are not present when using the 'resource-groups' client.
     '''
 
     resources = []
-    images_and_snapshots = get_other_ids.get_images(tag_key, tag_value)
+    images_and_snapshots = get_other_ids.get_images(tag_key, tag_value, regions)
     resources.extend(images_and_snapshots)
 
     return resources
@@ -73,10 +79,12 @@ def parse_resource_by_type(resource):
     arn = resource['ResourceArn']
     service = (resource['ResourceType'].split('::')[1]).lower()
     resource_type = (resource['ResourceType'].split('::')[2]).lower()
+    region = resource['Region']
     resource_for_deletion = {
         'resource_type': resource_type,
         'arn': arn,
-        'service': service
+        'service': service,
+        'region': region
     }
     return resource_for_deletion
 
@@ -128,6 +136,7 @@ def delete_resource(resource):
     service = resource['service']
     resource_type = resource['resource_type']
     arn = resource.get('arn') or resource.get('resource_id')
+    region = resource['region']
 
     # print(f"DEBUG: Checking DELETE_FUNCTIONS for service='{service}', resource_type='{resource_type}'")
 
@@ -141,7 +150,7 @@ def delete_resource(resource):
     if service in DELETE_FUNCTIONS and resource_type in DELETE_FUNCTIONS[service]:
         try:
             # print(f"DEBUG: Calling delete function for {service}::{resource_type}")
-            DELETE_FUNCTIONS[service][resource_type](arn)
+            DELETE_FUNCTIONS[service][resource_type](arn, region)
 
         except botocore.exceptions.ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
@@ -211,7 +220,9 @@ def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
 def main():
     tag_key = input("Enter the tag key to search by: ")
     tag_value = input("Enter the tag value to search by: ")
-    resources = get_resources_by_tag(tag_key, tag_value)
+    regions = [r.strip() for r in input("Which region(s) would you like to search? (separate multiple regions with commas): ").lower().split(',')]
+
+    resources = get_resources_by_tag(tag_key, tag_value, regions)
 
     print("\n Resources queued for deletion: \n")
     resources_for_deletion = []
@@ -220,7 +231,7 @@ def main():
         resource_for_deletion = parse_resource_by_type(resource)
         resources_for_deletion.append(resource_for_deletion)
 
-    other_resources_for_deletion = get_other_resources(tag_key, tag_value)
+    other_resources_for_deletion = get_other_resources(tag_key, tag_value, regions)
     resources_for_deletion.extend(other_resources_for_deletion)
     ordered_resources_for_deletion = order_resources_for_deletion(resources_for_deletion)
     print(json.dumps(ordered_resources_for_deletion, indent=4, default=str))

@@ -15,13 +15,13 @@ import boto3
 ######################### API GW Services ###########################
 
 # This has been tested and works. The same logic needs to be updated for the REST API function.
-def delete_api(arn):
+def delete_api(arn, region):
     '''
     Handles HTTP APIs and WebSocket APIs. Checks for any associated VPC links and optionally deletes them.
     If VPC links exist and are deleted, the function waits for them to become inactive or non-existent before proceeding.
     '''
     print(f"Deleting HTTP API {arn}...\n")
-    client = boto3.client('apigatewayv2')
+    client = boto3.client('apigatewayv2', region_name=region)
     api_id = arn.split('/')[-1]
 
     # Gather any integrations using VPC_LINK
@@ -119,12 +119,12 @@ def delete_api(arn):
     print()
 
 # TODO: This still needs to be tested.
-def delete_rest_api(arn):
+def delete_rest_api(arn, region):
     '''
     Handles REST APIs. Checks for any associated VPC links and optionally deletes them.
     If VPC links exist and are deleted, the function waits for them to become fully deleted before proceeding.
     '''
-    client = boto3.client('apigateway')
+    client = boto3.client('apigateway', region_name=region)
     api_id = arn.split('/')[-1]
     vpc_link_ids = set()
 
@@ -218,9 +218,9 @@ def delete_rest_api(arn):
 
 ####################### AutoScaling Service #########################
 
-def delete_autoscaling_group(arn):
+def delete_autoscaling_group(arn, region):
     print(f"Deleting autoscaling group {arn}...\n")
-    client = boto3.client('autoscaling')
+    client = boto3.client('autoscaling', region_name=region)
     asg_name = arn.split('/')[-1]
     response = client.delete_auto_scaling_group(AutoScalingGroupName=asg_name, ForceDelete=True)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -326,13 +326,13 @@ def wait_for_distribution_disabled(arn):
 
 ######################## DynamoDB Service ###########################
 
-def delete_dynamodb_table(arn):
+def delete_dynamodb_table(arn, region):
     """
     Deletes a DynamoDB table. If the table has deletion protection or items,
     the user will be prompted before proceeding.
     """
     print(f"Deleting DynamoDB table {arn}...\n")
-    client = boto3.client('dynamodb')
+    client = boto3.client('dynamodb', region_name=region)
     table_name = arn.split('/')[-1]
 
     # Check for deletion protection
@@ -380,9 +380,9 @@ def delete_dynamodb_table(arn):
 
 ########################### EC2 Service #############################
 
-def deregister_ami(arn):
+def deregister_ami(arn, region):
     print(f"Deregistering AMI {arn}...\n")
-    client = boto3.client('ec2')
+    client = boto3.client('ec2', region_name=region)
     response = client.deregister_image(ImageId=arn)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
         print(f"AMI {arn} was successfully deregistered")
@@ -392,8 +392,8 @@ def deregister_ami(arn):
     print()
 
 
-def delete_ec2_instance(arn):
-    client = boto3.client('ec2')
+def delete_ec2_instance(arn, region):
+    client = boto3.client('ec2', region_name=region)
     instance_id = arn.split('/')[-1]
     print(f"Terminating EC2 instance {instance_id}...\n")
 
@@ -429,9 +429,9 @@ def delete_ec2_instance(arn):
     print()
 
 
-def release_eip(arn):
+def release_eip(arn, region):
     print(f"Releasing Elastic IP {arn}...\n")
-    client = boto3.client('ec2')
+    client = boto3.client('ec2', region_name=region)
     allocation_id = arn.split('/')[-1]
     response = client.release_address(AllocationId=allocation_id)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -442,8 +442,8 @@ def release_eip(arn):
     print()
 
 
-def delete_internet_gateway(arn):
-    client = boto3.client('ec2')
+def delete_internet_gateway(arn, region):
+    client = boto3.client('ec2', region_name=region)
     gateway_id = arn.split('/')[-1]
     print(f"Deleting Internet Gateway {gateway_id}...\n")
 
@@ -481,8 +481,8 @@ def delete_internet_gateway(arn):
     print()
 
 
-def delete_nat_gateway(arn):
-    client = boto3.client('ec2')
+def delete_nat_gateway(arn, region):
+    client = boto3.client('ec2', region_name=region)
     nat_gateway_id = arn.split('/')[-1]
     print(f"Deleting Nat Gateway {nat_gateway_id}...\n")
     deleted = client.describe_nat_gateways(NatGatewayIds=[nat_gateway_id])['NatGateways'][0]['State']
@@ -510,8 +510,8 @@ def delete_nat_gateway(arn):
     print()
 
 
-def delete_route_table(arn):
-    client = boto3.client('ec2')
+def delete_route_table(arn, region):
+    client = boto3.client('ec2', region_name=region)
     route_table_id = arn.split('/')[-1]
     print(f"Deleting route table {route_table_id}...\n")
 
@@ -525,9 +525,9 @@ def delete_route_table(arn):
     print()
 
 
-def delete_snapshot(arn):
+def delete_snapshot(arn, region):
     print(f"Deleting snapshot {arn}...\n")
-    client = boto3.client('ec2')
+    client = boto3.client('ec2', region_name=region)
     response = client.delete_snapshot(SnapshotId=arn)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
         print(f"Snapshot {arn} was successfully deleted")
@@ -539,8 +539,8 @@ def delete_snapshot(arn):
 
 
 # TODO: Add a check for hanging ENIs
-def delete_subnet(arn):
-    client = boto3.client('ec2')
+def delete_subnet(arn, region):
+    client = boto3.client('ec2', region_name=region)
     subnet_id = arn.split('/')[-1]
 
     print(f"Deleting subnet {subnet_id}...\n")
@@ -601,8 +601,8 @@ def delete_subnet(arn):
     print()
 
 
-def delete_vpc_endpoint(arn):
-    client = boto3.client('ec2')
+def delete_vpc_endpoint(arn, region):
+    client = boto3.client('ec2', region_name=region)
     endpoint_id = arn.split('/')[-1]
     print(f"Deleting VPC endpoint {endpoint_id}...\n")
     try:
@@ -613,26 +613,27 @@ def delete_vpc_endpoint(arn):
             for error in response['Unsuccessful']:
                 # Check if VPC endpoint was already deleted
                 if 'Error' in error and error['Error']['Code'] == 'InvalidVpcEndpoint.NotFound':
-                    print(f"VPC endpoint {endpoint_id} was already deleted.")
+                    print(f"VPC endpoint {endpoint_id} was already deleted.\n")
                     return None
 
         # If deletion is successful
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-            print(f"VPC endpoint {endpoint_id} was successfully deleted")
+            print(f"VPC endpoint {endpoint_id} was successfully deleted\n")
         else:
-            print(f"VPC endpoint {endpoint_id} was not successfully deleted")
+            print(f"VPC endpoint {endpoint_id} was not successfully delete\n")
 
         # Print the full response for debugging
         print(json.dumps(response, indent=4, default=str))
+        print()
 
     except botocore.exceptions.ClientError as e:
         print(f"Failed to delete VPC endpoint {endpoint_id}: {str(e)}")
+        print()
         return None
-    print()
 
 
-def delete_vpc(arn):
-    client = boto3.client('ec2')
+def delete_vpc(arn, region):
+    client = boto3.client('ec2', region_name=region)
     vpc_id = arn.split('/')[-1]
     print(f"Deleting VPC {vpc_id}...\n")
     print((f"Checking VPC {vpc_id} for security groups...\n"))
@@ -665,13 +666,13 @@ def delete_vpc(arn):
 
 ########################## ELBv2 Service ############################
 
-def delete_elastic_load_balancer(arn):
+def delete_elastic_load_balancer(arn, region):
     '''
     Deletes ELB as well as any listeners and target groups.
     Handles all types of ELBs besides classic.
     '''
     print(f"Deleting ELB {arn}...\n")
-    client = boto3.client('elbv2')
+    client = boto3.client('elbv2', region_name=region)
 
     print("Checking ELB for listeners and target groups...")
     response = client.describe_listeners(LoadBalancerArn=arn)
@@ -762,8 +763,8 @@ def delete_elastic_load_balancer(arn):
     print()
 
 
-def delete_listener(arn):
-    client = boto3.client('elbv2')
+def delete_listener(arn, region):
+    client = boto3.client('elbv2', region_name=region)
     try:
         print(f"Deleting listener {arn}...\n")
         response = client.delete_listener(ListenerArn=arn)
@@ -779,8 +780,8 @@ def delete_listener(arn):
     print()
 
 
-def delete_target_group(arn):
-    client = boto3.client('elbv2')
+def delete_target_group(arn, region):
+    client = boto3.client('elbv2', region_name=region)
     try:
         print(f"Deleting target group {arn}...\n")
         response = client.delete_target_group(TargetGroupArn=arn)
@@ -799,9 +800,9 @@ def delete_target_group(arn):
 
 ######################### Lambda Service ############################
 
-def delete_lambda_function(arn):
+def delete_lambda_function(arn, region):
     print(f"Deleting Lambda function {arn}...\n")
-    client = boto3.client('lambda')
+    client = boto3.client('lambda', region_name=region)
     response = client.delete_function(FunctionName=arn)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
         print(f"Lambda function {arn} was successfully deleted")
@@ -813,12 +814,12 @@ def delete_lambda_function(arn):
 
 ########################### S3 Service ##############################
 
-def delete_s3_bucket(arn):
+def delete_s3_bucket(arn, region):
     '''
     Checks to see if bucket has objects. If it does, the user will be prompted if they really
     want to delete the bucket and all of its objects. Works with versioned as well as unversioned buckets.
     '''
-    client = boto3.client('s3')
+    client = boto3.client('s3', region_name=region)
     bucket_name = arn.split(':')[-1]
 
     try:
@@ -881,9 +882,9 @@ def delete_s3_bucket(arn):
 
 ########################## SQS Service ##############################
 
-def delete_sqs_queue(arn):
+def delete_sqs_queue(arn, region):
     print(f"Deleting SQS queue {arn}...\n")
-    client = boto3.client('sqs')
+    client = boto3.client('sqs', region_name=region)
     queue_name = arn.split(':')[-1]
     queue_url = client.get_queue_url(QueueName=queue_name)['QueueUrl']
     response = client.delete_queue(QueueUrl=queue_url)
