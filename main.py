@@ -94,7 +94,8 @@ def order_resources_for_deletion(resources):
                 'internetgateway',
                 'routetable',
                 'vpc',
-                'transitgatewayattachment'
+                'transitgatewayattachment',
+                "instance"
             )
         )
     ]
@@ -107,7 +108,9 @@ def order_resources_for_deletion(resources):
     ordered_resources.extend([resource for resource in non_ordered_resources])
     ordered_resources.extend([resource for resource in other_resources])
     ordered_resources.extend([resource for resource in ordered_non_networking_resources if "autoscaling" in resource["service"]])
-    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "elasticloadbalancingv2" in resource["service"]])
+    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "loadbalancer" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "listener" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "targetgroup" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in ordered_networking_resources if "instance" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in ordered_networking_resources if "vpcendpoint" in resource["resource_type"]])
     ordered_resources.extend([resource for resource in ordered_networking_resources if "natgateway" in resource["resource_type"]])

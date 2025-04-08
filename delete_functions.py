@@ -402,20 +402,21 @@ def delete_ec2_instance(arn):
     except botocore.exceptions.ClientError as e:
         error_code = e.response.get('Error', {}).get('Code', '')
         if error_code == 'InvalidInstanceID.NotFound':
-            print(f"EC2 instance {instance_id} not found. It may have already been terminated.")
+            print(f"EC2 instance {instance_id} not found. It may have already been terminated.\n")
             return
         else:
             print(f"Error describing EC2 instance {instance_id}: {e}")
             raise
+            print()
 
     if not response['Reservations']:
-        print(f"EC2 instance {instance_id} not found. It may have already been terminated.")
+        print(f"EC2 instance {instance_id} not found. It may have already been terminated.\n")
         return
 
     instance_status = response['Reservations'][0]['Instances'][0]['State']['Name']
 
     if instance_status in ['terminated', 'shutting-down']:
-        print(f"Current status of EC2 instance {instance_id} is: {instance_status}. Skipping...")
+        print(f"Current status of EC2 instance {instance_id} is: {instance_status}. Skipping...\n")
         return
 
     response = client.terminate_instances(InstanceIds=[instance_id])
@@ -424,6 +425,7 @@ def delete_ec2_instance(arn):
     else:
         print(f"EC2 instance {instance_id} was not successfully terminated.")
     print(json.dumps(response, indent=4, default=str))
+
     print()
 
 
@@ -700,12 +702,12 @@ def delete_elastic_load_balancer(arn):
 
     # Confirm deletion of listeners and target groups
     print(f"Proceeding with deleting ELB {arn} will also delete the following listeners and target groups:\n")
-    print("Listeners:")
+    print("    Listeners:")
     for listener in listener_arns:
-        print(listener)
-    print("\nTarget groups:")
+        print(f"      {listener}")
+    print("\n    Target groups:")
     for tg in target_group_arns:
-        print(tg)
+        print(f"      {tg}")
     print()
     delete_tgs_and_listeners = input("Proceed? (y/n): ").strip().lower()
 
@@ -756,6 +758,40 @@ def delete_elastic_load_balancer(arn):
         print(f"Load balancer {arn} has been fully deleted")
     except botocore.exceptions.WaiterError as e:
         print(f"Load balancer {arn} has not been fully deleted: {e}")
+
+    print()
+
+
+def delete_listener(arn):
+    client = boto3.client('elbv2')
+    try:
+        print(f"Deleting listener {arn}...\n")
+        response = client.delete_listener(ListenerArn=arn)
+        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+            print(f"Listener {arn} was successfully deleted")
+        else:
+            print(f"Listener {arn} was not successfully deleted")
+        print(json.dumps(response, indent=4, default=str))
+
+    except client.exceptions.ListenerNotFoundException:
+        print(f"Listener {arn} was not found and may have already been deleted")
+
+    print()
+
+
+def delete_target_group(arn):
+    client = boto3.client('elbv2')
+    try:
+        print(f"Deleting target group {arn}...\n")
+        response = client.delete_target_group(TargetGroupArn=arn)
+        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+            print(f"Target group {arn} was successfully deleted")
+        else:
+            print(f"Target group {arn} was not successfully deleted")
+        print(json.dumps(response, indent=4, default=str))
+
+    except client.exceptions.TargetGroupNotFoundException:
+        print(f"Target group {arn} was not found and may have already been deleted")
 
     print()
 
@@ -899,7 +935,9 @@ DELETE_FUNCTIONS = {
         'vpcpeering': lambda resource: print("deleting vpc peering"),  # delete_vpc_peering_connection(resource['arn'])
     },
     'elasticloadbalancingv2': {
-        'loadbalancer': delete_elastic_load_balancer
+        'loadbalancer': delete_elastic_load_balancer,
+        'listener': delete_listener,
+        'targetgroup': delete_target_group,
     },
     # 'iam': {
     #     'managedpolicy': lambda resource: print("deleting managed policy"),  # delete_managed_policy(resource['arn'])
