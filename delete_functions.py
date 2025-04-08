@@ -684,19 +684,37 @@ def delete_elastic_load_balancer(arn):
                 for tg in forward_config.get("TargetGroups", []):
                     target_group_arns.add(tg['TargetGroupArn'])
 
+    # Check if target groups are attached to other ELBs and exit if they are
+    tgs_attached_to_other_elbs = []
+    for tg_arn in target_group_arns:
+        tg_info = client.describe_target_groups(TargetGroupArns=[tg_arn])['TargetGroups'][0]
+        if len(tg_info['LoadBalancerArns']) > 1:
+            tgs_attached_to_other_elbs.append(tg_arn)
+
+    if tgs_attached_to_other_elbs:
+        print("The following target groups are used by other ELBs and will not be deleted:\n")
+        for tg in tgs_attached_to_other_elbs:
+            print(tg)
+        print(f"ELB {arn} cannot be deleted at this time. Exiting...\n")
+        return
+
+    # Confirm deletion of listeners and target groups
     print(f"Proceeding with deleting ELB {arn} will also delete the following listeners and target groups:\n")
+    print("Listeners:")
     for listener in listener_arns:
-        print(f"Listener: {listener}")
+        print(listener)
+    print("\nTarget groups:")
     for tg in target_group_arns:
-        print(f"Target group: {tg}")
+        print(tg)
     print()
-    delete_tgs_and_listeners = input("Proceed? (y/n): ")
+    delete_tgs_and_listeners = input("Proceed? (y/n): ").strip().lower()
+
     if delete_tgs_and_listeners != 'y':
         print("Skipping ELB deletion...")
         return
 
-    print("Deleting target groups and listeners...")
     # Delete listeners
+    print("Deleting target groups and listeners...")
     for listener in listener_arns:
         response = client.delete_listener(ListenerArn=listener)
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:

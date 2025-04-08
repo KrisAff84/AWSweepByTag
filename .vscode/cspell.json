@@ -5,7 +5,8 @@
     "asgclient",
     "elbv2",
     "apigatewayv2",
-    "enis"
+    "enis",
+    "elbs"
 
   ]
 
