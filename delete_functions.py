@@ -684,6 +684,18 @@ def delete_elastic_load_balancer(arn):
                 for tg in forward_config.get("TargetGroups", []):
                     target_group_arns.add(tg['TargetGroupArn'])
 
+    print(f"Proceeding with deleting ELB {arn} will also delete the following listeners and target groups:\n")
+    for listener in listener_arns:
+        print(f"Listener: {listener}")
+    for tg in target_group_arns:
+        print(f"Target group: {tg}")
+    print()
+    delete_tgs_and_listeners = input("Proceed? (y/n): ")
+    if delete_tgs_and_listeners != 'y':
+        print("Skipping ELB deletion...")
+        return
+
+    print("Deleting target groups and listeners...")
     # Delete listeners
     for listener in listener_arns:
         response = client.delete_listener(ListenerArn=listener)
