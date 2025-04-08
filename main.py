@@ -83,7 +83,22 @@ def parse_resource_by_type(resource):
 
 def order_resources_for_deletion(resources):
     # Networking resources that must follow a particular deletion order
-    networking_resources = [resource for resource in resources if "ec2" in resource["service"]]
+    ordered_networking_resources = [
+        resource for resource in resources
+        if ("ec2" in resource["service"]) and (
+            resource['resource_type'] in (
+                'vpcendpoint',
+                'natgateway',
+                'subnet',
+                'eip',
+                'internetgateway',
+                'routetable',
+                'vpc',
+                'transitgatewayattachment',
+                "instance"
+            )
+        )
+    ]
     # Other resources that must follow a particlar deletion order
     ordered_non_networking_resources = [resource for resource in resources if "ec2" not in resource["service"]]
     non_ordered_resources = [resource for resource in ordered_non_networking_resources if resource["service"] not in ["elasticloadbalancingv2", "autoscaling"]]
@@ -93,15 +108,17 @@ def order_resources_for_deletion(resources):
     ordered_resources.extend([resource for resource in non_ordered_resources])
     ordered_resources.extend([resource for resource in other_resources])
     ordered_resources.extend([resource for resource in ordered_non_networking_resources if "autoscaling" in resource["service"]])
-    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "elasticloadbalancingv2" in resource["service"]])
-    ordered_resources.extend([resource for resource in networking_resources if "instance" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in networking_resources if "vpcendpoint" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in networking_resources if "natgateway" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in networking_resources if "subnet" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in networking_resources if "eip" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in networking_resources if "internetgateway" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in networking_resources if "routetable" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in networking_resources if resource["resource_type"] == "vpc"])
+    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "loadbalancer" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "listener" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "targetgroup" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_networking_resources if "instance" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_networking_resources if "vpcendpoint" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_networking_resources if "natgateway" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_networking_resources if "subnet" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_networking_resources if "eip" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_networking_resources if "internetgateway" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_networking_resources if "routetable" in resource["resource_type"]])
+    ordered_resources.extend([resource for resource in ordered_networking_resources if resource["resource_type"] == "vpc"])
 
     return ordered_resources
 
@@ -211,12 +228,14 @@ def main():
     print(f"\n{len(ordered_resources_for_deletion)} resources queued for deletion. \n")
 
     # Figure out how to make this clearer
-    delete = input("Are you sure you want to delete all of these resources? (y/n): \n")
-    prompt = input("Do you want to be prompted before deleting each resource? Selecting 'n' will delete all resources automatically. (y/n): \n")
+    delete = input("Are you sure you want to delete all of these resources? (y/n): ")
 
     if delete.lower() != 'y':
         print("Exiting...")
         return
+
+    prompt = input("Do you want to be prompted before deleting each resource? Selecting 'n' will delete all resources automatically. (y/n): ")
+    print()
 
     failed_deletions = []
 
@@ -225,6 +244,7 @@ def main():
 
         if prompt.lower() == 'y':
             confirm = input(f"\nDo you want to delete the following resource?\n{json.dumps(resource, indent=4, default=str )}\n[y/n]?: ")
+            print()
             if confirm.lower() != 'y':
                 print(f"Skipping deletion of {resource_name}")
                 continue

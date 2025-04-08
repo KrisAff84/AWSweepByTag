@@ -4,7 +4,9 @@
     "elasticloadbalancingv2",
     "asgclient",
     "elbv2",
-    "apigatewayv2"
+    "apigatewayv2",
+    "enis",
+    "elbs"
 
   ]
 
