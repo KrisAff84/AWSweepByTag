@@ -26,5 +26,7 @@ def failure_print(text, indent=4):
     print(Format.red + ' ' * indent + text + Format.end)
 
 def response_print(text, indent=6):
-    print(' ' * indent + text)
+    indent_str = ' ' * indent
+    for line in text.splitlines():
+        print(indent_str + line)
     print()

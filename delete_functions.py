@@ -41,11 +41,10 @@ def delete_api(arn, region):
         response = client.delete_api(ApiId=api_id)
         status_code = response['ResponseMetadata']['HTTPStatusCode']
         if 200 <= status_code < 300:
-            tf.success_print(f"HTTP API {arn} was successfully deleted")
+            tf.success_print(f"API {arn} was successfully deleted")
         else:
-            tf.failure_print(f"HTTP API {arn} was not successfully deleted")
+            tf.failure_print(f"API {arn} was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
-        print()
     except botocore.exceptions.ClientError as e:
         tf.failure_print(f"Failed to delete API {arn}: {e}\n")
 
@@ -75,7 +74,6 @@ def delete_api(arn, region):
     else:
         return
 
-    print()
     # Wait for VPC links to become inactive (avoid dependency issues)
     if vpc_link_ids and delete_vpc_links == 'y':
         tf.indent_print("Checking status(es) of VPC link(s) to avoid dependency violations...\n")
@@ -99,11 +97,12 @@ def delete_api(arn, region):
                         all_inactive = False
                 except botocore.exceptions.ClientError as e:
                     if e.response['Error']['Code'] == 'NotFoundException':
-                        tf.indent_print(f"VPC link {vpc_link_id} is already deleted")
+                        tf.success_print(f"VPC link {vpc_link_id} is already deleted")
                     else:
                         tf.indent_print(f"Error checking status for VPC link {vpc_link_id}: {e}")
                         all_inactive = False
 
+            print()
             if all_inactive:
                 tf.success_print("All VPC links are inactive or deleted")
                 break
@@ -116,7 +115,7 @@ def delete_api(arn, region):
                 retry += 1
 
         if retry > max_retries:
-            tf.indent_print("Some VPC links may still be active. Please check manually")
+            tf.failure_print("Some VPC links may still be active. Please check manually")
     print()
 
 # TODO: This still needs to be tested.
@@ -172,12 +171,12 @@ def delete_rest_api(arn, region):
 
     # Deletes the REST API
     try:
-        response = client.delete_rest_api(ApiId=api_id)
+        response = client.delete_rest_api(restApiId=api_id)
         status_code = response['ResponseMetadata']['HTTPStatusCode']
         if 200 <= status_code < 300:
-            tf.indent_print(f"HTTP API {arn} was successfully deleted")
+            tf.success_print(f"REST API {arn} was successfully deleted")
         else:
-            tf.indent_print(f"HTTP API {arn} was not successfully deleted")
+            tf.failure_print(f"REST API {arn} was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
     except botocore.exceptions.ClientError as e:
         tf.indent_print(f"Failed to delete API {arn}: {e}")
@@ -366,11 +365,12 @@ def delete_dynamodb_table(arn, region):
             return
 
     # Delete the table
+    print()
     response = client.delete_table(TableName=table_name)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.success_print(f"\nDynamoDB table {table_name} was successfully deleted")
+        tf.success_print(f"DynamoDB table {table_name} was successfully deleted")
     else:
-        tf.failure_print(f"\nDynamoDB table {table_name} was not successfully deleted")
+        tf.failure_print(f"DynamoDB table {table_name} was not successfully deleted")
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 ########################### EC2 Service #############################
@@ -448,10 +448,10 @@ def delete_internet_gateway(arn, region):
             vpc_id = attachment.get('VpcId')
             if vpc_id:
                 client.detach_internet_gateway(InternetGatewayId=gateway_id, VpcId=vpc_id)
-                tf.success_print(f"Internet Gateway {gateway_id} was successfully detached from VPC {vpc_id}", 6)
+                tf.success_print(f"Internet Gateway {gateway_id} was successfully detached from VPC {vpc_id}")
 
     except botocore.exceptions.ClientError as e:
-        tf.failure_print(f"Failed to detach Internet Gateway {gateway_id}, error: {str(e)}", 6)
+        tf.failure_print(f"Failed to detach Internet Gateway {gateway_id}, error: {str(e)}")
         return
 
     print()
@@ -476,7 +476,7 @@ def delete_nat_gateway(arn, region):
     tf.header_print(f"Deleting Nat Gateway {nat_gateway_id} in {region}...")
     deleted = client.describe_nat_gateways(NatGatewayIds=[nat_gateway_id])['NatGateways'][0]['State']
     if deleted == 'deleted' or deleted == 'deleting':
-        tf.indent_print(f"Nat gateway {nat_gateway_id} was already deleted")
+        tf.success_print(f"Nat gateway {nat_gateway_id} was already deleted")
         return
     try:
         response = client.delete_nat_gateway(NatGatewayId=nat_gateway_id)
@@ -598,16 +598,17 @@ def delete_vpc_endpoint(arn, region):
 
                 # Handle specific known error
                 if error_code == 'InvalidVpcEndpoint.NotFound':
-                    tf.indent_print(f"VPC endpoint {resource_id} was already deleted.")
+                    tf.success_print(f"VPC endpoint {resource_id} was already deleted.")
                 else:
                     tf.failure_print(f"Failed to delete VPC endpoint {resource_id}: {error_code} - {error_msg}")
                 tf.response_print(json.dumps(response, indent=4, default=str))
+                return
 
         # If deletion is successful
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-            tf.success_print(f"VPC endpoint {endpoint_id} was successfully deleted\n")
+            tf.success_print(f"VPC endpoint {endpoint_id} was successfully deleted")
         else:
-            tf.failure_print(f"VPC endpoint {endpoint_id} was not successfully delete\n")
+            tf.failure_print(f"VPC endpoint {endpoint_id} was not successfully delete")
         tf.response_print(json.dumps(response, indent=4, default=str))
 
     except botocore.exceptions.ClientError as e:
@@ -677,7 +678,7 @@ def delete_elastic_load_balancer(arn, region):
     if tgs_attached_to_other_elbs:
         tf.indent_print("The following target groups are used by other ELBs and will not be deleted:\n")
         for tg in tgs_attached_to_other_elbs:
-            tf.indent_print(tg, indent=8)
+            tf.indent_print(tg, indent=6)
         tf.indent_print(f"ELB {arn} cannot be deleted at this time. Exiting...\n")
         return
 
@@ -690,7 +691,7 @@ def delete_elastic_load_balancer(arn, region):
     for tg in target_group_arns:
         tf.indent_print(tg, indent=8)
     print()
-    delete_tgs_and_listeners = input(    "Proceed? (y/n): ").strip().lower()
+    delete_tgs_and_listeners = tf.prompt("Proceed?")
 
     if delete_tgs_and_listeners != 'y':
         tf.indent_print("Skipping ELB deletion...")
@@ -701,44 +702,41 @@ def delete_elastic_load_balancer(arn, region):
     for listener in listener_arns:
         response = client.delete_listener(ListenerArn=listener)
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-            tf.indent_print(f"Listener {listener} was successfully deleted")
+            tf.success_print(f"Listener {listener} was successfully deleted")
         else:
-            tf.indent_print(f"Listener {listener} was not successfully deleted")
-        tf.indent_print(json.dumps(response, indent=4, default=str))
-
-        print()
+            tf.failure_print(f"Listener {listener} was not successfully deleted")
+        tf.response_print(json.dumps(response, indent=4, default=str))
 
     # Delete target groups
     for tg in target_group_arns:
         response = client.delete_target_group(TargetGroupArn=tg)
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-            tf.indent_print(f"Target group {tg} was successfully deleted")
+            tf.success_print(f"Target group {tg} was successfully deleted")
         else:
-            tf.indent_print(f"Target group {tg} was not successfully deleted")
-        tf.indent_print(json.dumps(response, indent=4, default=str))
-
-        print()
+            tf.failure_print(f"Target group {tg} was not successfully deleted")
+        tf.response_print(json.dumps(response, indent=4, default=str))
 
     # Delete load balancer
     tf.indent_print("Initiating ELB deletion...")
     response = client.delete_load_balancer(LoadBalancerArn=arn)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.indent_print(f"Deletion of load balancer {arn} was successfully initiated")
+        tf.success_print(f"Deletion of load balancer {arn} was successfully initiated")
     else:
-        tf.indent_print(f"Deletion of load balancer {arn} was not successfully initiated")
-    tf.indent_print(json.dumps(response, indent=4, default=str))
+        tf.failure_print(f"Deletion of load balancer {arn} was not successfully initiated")
+    tf.response_print(json.dumps(response, indent=4, default=str))
 
     # Check to make sure load balancer is fully deleted
-    tf.indent_print(f"\nWaiting for ELB {arn} to be fully deleted...")
+    print()
+    tf.indent_print(f"Waiting for ELB {arn} to be fully deleted...")
     load_balancer_deleted = client.get_waiter('load_balancers_deleted')
     try:
         load_balancer_deleted.wait(
             LoadBalancerArns=[arn],
             WaiterConfig={'Delay': 10, 'MaxAttempts': 12}
         )
-        tf.indent_print(f"Load balancer {arn} has been fully deleted")
+        tf.success_print(f"Load balancer {arn} has been fully deleted")
     except botocore.exceptions.WaiterError as e:
-        tf.indent_print(f"Load balancer {arn} has not been fully deleted: {e}")
+        tf.failure_print(f"Load balancer {arn} has not been fully deleted: {e}")
 
     print()
 
@@ -861,6 +859,34 @@ def delete_s3_bucket(arn, region):
     except Exception as e:
         tf.header_print(f"Error deleting S3 bucket {bucket_name} in {region}: {e}")
 
+########################## SNS Service ##############################
+
+def delete_sns_topic(arn, region):
+    client = boto3.client('sns', region_name=region)
+    topic_arn = arn
+    tf.header_print(f"Deleting SNS topic {topic_arn} in {region}...")
+
+    response = client.list_subscriptions_by_topic(TopicArn=topic_arn)
+    subscriptions = response.get('Subscriptions', [])
+    if subscriptions:
+        tf.indent_print(f"{tf.Format.yellow}SNS topic has the following subscriptions:{tf.Format.end}")
+        for subscription in subscriptions:
+            tf.indent_print(json.dumps(subscription, indent=4, default=str), 6)
+        confirm = tf.prompt("Do you wish to proceed with deleting the topic and all of its subscriptions?")
+
+        if confirm != 'y':
+            tf.indent_print("Skipping SNS topic deletion...\n")
+            return
+
+    print()
+    response = client.delete_topic(TopicArn=topic_arn)
+    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+        tf.success_print(f"SNS topic {topic_arn} was successfully deleted")
+    else:
+        tf.failure_print(f"SNS topic {topic_arn} was not successfully deleted")
+    tf.response_print(json.dumps(response, indent=4, default=str))
+
+
 ########################## SQS Service ##############################
 
 def delete_sqs_queue(arn, region):
@@ -883,7 +909,7 @@ def delete_sqs_queue(arn, region):
 
 DELETE_FUNCTIONS = {
     'apigateway': {
-        'restapi': delete_rest_api
+        'restapi': delete_rest_api # For REST APIs
     },
     'apigatewayv2': {
         'api': delete_api # For HTTP and websocket APIs
@@ -932,6 +958,9 @@ DELETE_FUNCTIONS = {
     'lambda': {
         'function': delete_lambda_function
     },
+    'rds': {
+        'dbinstance': lambda resource: print("deleting db instance"),  # delete_db_instance(resource['arn'])
+    },
     'route53': {
         'hostedzone': lambda resource: print("deleting hosted zone"),  # delete_hosted_zone(resource['arn'])
     },
@@ -942,7 +971,7 @@ DELETE_FUNCTIONS = {
         'secret': lambda resource: print("deleting secret"),  # delete_secret(resource['arn'])
     },
     'sns': {
-        'topic': lambda resource: print("deleting topic"),  # delete_topic(resource['arn'])
+        'topic': delete_sns_topic
     },
     'sqs': {
         'queue': delete_sqs_queue

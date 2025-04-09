@@ -6,7 +6,8 @@
     "elbv2",
     "apigatewayv2",
     "enis",
-    "elbs"
+    "elbs",
+    "dbinstance"
 
   ]
 
