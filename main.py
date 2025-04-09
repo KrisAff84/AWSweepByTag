@@ -4,6 +4,7 @@ import boto3
 import botocore.exceptions
 from delete_functions import DELETE_FUNCTIONS, disable_cloudfront_distribution, wait_for_distribution_disabled, delete_cloudfront_distribution
 import get_other_ids
+import text_formatting as tf
 
 
 def get_resources_by_tag(tag_key, tag_value, regions):
@@ -224,7 +225,7 @@ def main():
 
     resources = get_resources_by_tag(tag_key, tag_value, regions)
 
-    print("\n Resources queued for deletion: \n")
+    tf.header_print("\nResources queued for deletion:\n")
     resources_for_deletion = []
 
     for resource in resources:
