@@ -381,12 +381,25 @@ def delete_dynamodb_table(arn, region):
 
     # Delete the table
     print()
-    response = client.delete_table(TableName=table_name)
-    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.success_print(f"DynamoDB table {table_name} was successfully deleted")
-    else:
-        tf.failure_print(f"DynamoDB table {table_name} was not successfully deleted")
-    tf.response_print(json.dumps(response, indent=4, default=str))
+    try:
+        response = client.delete_table(TableName=table_name)
+        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+            tf.success_print(f"Table {table_name} was successfully deleted")
+        else:
+            tf.failure_print(f"Table {table_name} was not successfully deleted")
+        tf.response_print(json.dumps(response, indent=4, default=str))
+
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == 'ValidationException' and 'has acted as a source region for new replica(s)' in e.response['Error']['Message']:
+            tf.failure_print(f"Cannot delete table {table_name}: It was used to provision replicas in the last 24 hours.\n")
+            tf.failure_print("You must either:", 6)
+            tf.failure_print("1. Wait 24 hours from the time of provisioning replicas to retry", 8)
+            tf.failure_print("2. Delete the replica(s) and/or main table via the AWS console\n", 8)
+            return
+        else:
+            tf.failure_print(f"Error deleting DynamoDB table {table_name}: {e}\n")
+            return
 
 ########################### EC2 Service #############################
 
