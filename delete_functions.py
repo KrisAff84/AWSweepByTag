@@ -225,12 +225,27 @@ def delete_autoscaling_group(arn, region):
     tf.header_print(f"Deleting autoscaling group {arn} in {region}...")
     client = boto3.client('autoscaling', region_name=region)
     asg_name = arn.split('/')[-1]
+    instances = [
+        instance["InstanceId"]
+        for instance in client.describe_auto_scaling_groups(AutoScalingGroupNames=[asg_name])["AutoScalingGroups"][0]["Instances"]
+    ]
+
     response = client.delete_auto_scaling_group(AutoScalingGroupName=asg_name, ForceDelete=True)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.success_print(f"Autoscaling group {arn} was successfully deleted")
+        tf.success_print(f"Autoscaling group {arn} deletion initiated successfully")
     else:
         tf.failure_print(f"Autoscaling group {arn} was not successfully deleted")
     tf.response_print(json.dumps(response, indent=4, default=str))
+
+    # Check to make sure autoscaling instances are fully shut down
+    if instances:
+        for instance in instances:
+            delete_ec2_instance(instance, region, True)
+        tf.indent_print("Waiting for autoscaling instances to shut down to avoid dependency violations...")
+
+        ec2_waiter(instances, region)
+        tf.success_print("All instances in autoscaling group are terminated.")
+        print()
 
 ####################### CloudFront Service ##########################
 
@@ -386,17 +401,21 @@ def deregister_ami(arn, region):
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-def delete_ec2_instance(arn, region):
+def delete_ec2_instance(arn, region, autoscaling=False):
     client = boto3.client('ec2', region_name=region)
     instance_id = arn.split('/')[-1]
-    tf.header_print(f"Terminating EC2 instance {instance_id} in {region}...")
+
+    if autoscaling:
+        tf.indent_print(f"Terminating EC2 instance {instance_id} in {region}...")
+    else:
+        tf.header_print(f"Terminating EC2 instance {instance_id} in {region}...")
 
     try:
         response = client.describe_instances(InstanceIds=[instance_id])
     except botocore.exceptions.ClientError as e:
         error_code = e.response.get('Error', {}).get('Code', '')
         if error_code == 'InvalidInstanceID.NotFound':
-            tf.indent_print(f"EC2 instance {instance_id} not found. It may have already been terminated.\n")
+            tf.success_print(f"EC2 instance {instance_id} not found. It may have already been terminated.\n")
             return
         else:
             tf.failure_print(f"Error describing EC2 instance {instance_id}: {e}")
@@ -404,21 +423,38 @@ def delete_ec2_instance(arn, region):
             print()
 
     if not response['Reservations']:
-        tf.indent_print(f"EC2 instance {instance_id} not found. It may have already been terminated.\n")
+        tf.success_print(f"EC2 instance {instance_id} not found. It may have already been terminated.\n")
         return
 
     instance_status = response['Reservations'][0]['Instances'][0]['State']['Name']
 
     if instance_status in ['terminated', 'shutting-down']:
-        tf.indent_print(f"Current status of EC2 instance {instance_id} is: {instance_status}. Skipping...\n")
+        tf.success_print(f"Current status of EC2 instance {instance_id} is: {instance_status}. Skipping...\n")
         return
 
     response = client.terminate_instances(InstanceIds=[instance_id])
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.success_print(f"EC2 instance {instance_id} was successfully terminated.")
+        tf.success_print(f"EC2 instance {instance_id} is shutting down.")
     else:
-        tf.failure_print(f"EC2 instance {instance_id} was not successfully terminated.")
+        tf.failure_print(f"EC2 instance {instance_id} termination was not successfully initiated.")
     tf.response_print(json.dumps(response, indent=4, default=str))
+
+    if not autoscaling:
+        ec2_waiter([instance_id], region)
+        tf.success_print(f"EC2 instance {instance_id} has been terminated.")
+        print()
+
+
+def ec2_waiter(instance_ids, region):
+    client = boto3.client('ec2', region_name=region)
+    waiter = client.get_waiter('instance_terminated')
+    waiter.wait(
+        InstanceIds=instance_ids,
+        WaiterConfig={
+            'Delay': 15,
+            'MaxAttempts': 20
+        }
+    )
 
 
 def release_eip(arn, region):
@@ -896,12 +932,10 @@ def delete_sqs_queue(arn, region):
     queue_url = client.get_queue_url(QueueName=queue_name)['QueueUrl']
     response = client.delete_queue(QueueUrl=queue_url)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.indent_print(f"SQS queue {arn} was successfully deleted")
+        tf.success_print(f"SQS queue {arn} was successfully deleted")
     else:
-        tf.indent_print(f"SQS queue {arn} was not successfully deleted")
-    tf.indent_print(json.dumps(response, indent=4, default=str))
-
-    print()
+        tf.failure_print(f"SQS queue {arn} was not successfully deleted")
+    tf.response_print(json.dumps(response, indent=4, default=str))
 
 ###################################################################
 # Delete function mappings
