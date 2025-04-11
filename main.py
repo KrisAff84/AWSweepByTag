@@ -2,7 +2,8 @@ import json
 import time
 import boto3
 import botocore.exceptions
-from delete_functions import DELETE_FUNCTIONS, disable_cloudfront_distribution, wait_for_distribution_disabled, delete_cloudfront_distribution
+import delete_resource_map as drmap
+from delete_functions import disable_cloudfront_distribution, wait_for_distribution_disabled, delete_cloudfront_distribution
 import get_other_ids
 import text_formatting as tf
 
@@ -47,6 +48,7 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
 
         try:
             response = client.search_resources(ResourceQuery=query)
+            print(f"DEBUG - Original response:{json.dumps(response, indent=4, default=str)}")
             while True:
                 for res in response.get('ResourceIdentifiers', []):
                     res['Region'] = region
@@ -60,6 +62,7 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
         except botocore.exceptions.ClientError as e:
             print(f"Error querying resources in region {region}: {e}")
             continue
+
 
         # Autoscaling Groups - handled separately
         asgclient = boto3.client('autoscaling', region_name=region)
@@ -80,7 +83,7 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
         except botocore.exceptions.ClientError as e:
             print(f"Error querying ASGs in region {region}: {e}")
 
-    print(f"DEBUG: {json.dumps(resources, indent=4, default=str)}")
+    print(f"DEBUG: - Modified response:{json.dumps(resources, indent=4, default=str)}")
 
     return resources
 
@@ -197,10 +200,10 @@ def delete_resource(resource):
         else:
             return
 
-    if service in DELETE_FUNCTIONS and resource_type in DELETE_FUNCTIONS[service]:
+    if service in drmap.DELETE_FUNCTIONS and resource_type in drmap.DELETE_FUNCTIONS[service]:
         try:
             # print(f"DEBUG: Calling delete function for {service}::{resource_type}")
-            DELETE_FUNCTIONS[service][resource_type](arn, region)
+            drmap.DELETE_FUNCTIONS[service][resource_type](arn, region)
 
         except botocore.exceptions.ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')

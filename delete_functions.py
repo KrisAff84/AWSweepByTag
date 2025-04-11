@@ -1,7 +1,57 @@
-'''
-Contains the delete functions as well as the DELETE_FUNCTIONS dictionary, which maps resource and service
-to the appropriate individual delete function.
-'''
+"""
+Deletion functions for individual resource types
+
+Functions are ordered based on service and then resource.
+
+Functions By Service:
+    APIGW:
+        - delete_api:
+        - delete_rest_api
+
+    Application Auto Scaling:
+        - delete_application_autoscaling
+
+    Autoscaling:
+        - delete_autoscaling_group
+
+    CloudFront:
+        - delete_cloudfront_distribution
+        - disable_cloudfront_distribution
+        - wait_for_distribution_disabled
+
+    DynamoDB:
+        - delete_dynamodb_table
+
+    EC2:
+        - deregister_ami
+        - delete_ec2_instance
+        - ec2_waiter
+        - release_eip
+        - delete_internet_gateway
+        - delete_nat_gateway
+        - delete_route_table
+        - delete_snapshot
+        - delete_subnet
+        - delete_vpc_endpoint
+        - delete_vpc
+
+    Elastic Load Balancing:
+        - delete_elastic_load_balancer
+        - delete_listener
+        - delete_target_group
+
+    Lambda:
+        - delete_lambda_function
+
+    S3:
+        - delete_s3_bucket
+
+    SNS:
+        - delete_sns_topic
+
+    SQS:
+        - delete_sqs_queue
+"""
 
 import time
 import json
@@ -10,17 +60,24 @@ import boto3
 import text_formatting as tf
 
 
-#######################################################################
-# Individual Deletion Functions
-#######################################################################
-
 ######################### API GW Services ###########################
 
 # This has been tested and works. The same logic needs to be updated for the REST API function.
-def delete_api(arn, region):
+def delete_api(arn: str, region: str) -> None:
     """
-    Handles HTTP APIs and WebSocket APIs. Checks for any associated VPC links and optionally deletes them.
-    If VPC links exist and are deleted, the function waits for them to become inactive or non-existent before proceeding.
+    Delete HTTP or websocket API from API GW in a given region.
+
+    1. Checks API for any associated VPC links
+    2. Attempts to delete API
+    3. Prints success or failure message depending on response, along with the response itself
+    4. Prompts user to delete any associated VPC links if present
+    5. Attempts to delete each VPC link while printing success or failure message along with each response
+    6. Waits for all VPC links to become inactive or non-existent before exiting function as long as retries aren't exceeded
+    7. Prints error message if VPC links are still active after retries are exceeded
+
+    Args:
+        arn (str): The ARN of the API to delete
+        region (str): The AWS region where the API is located
     """
 
     client = boto3.client('apigatewayv2', region_name=region)
@@ -1045,79 +1102,3 @@ def delete_sqs_queue(arn, region):
     else:
         tf.failure_print(f"SQS queue {arn} was not successfully deleted")
     tf.response_print(json.dumps(response, indent=4, default=str))
-
-###################################################################
-# Delete function mappings
-###################################################################
-
-DELETE_FUNCTIONS = {
-    'apigateway': {
-        'restapi': delete_rest_api # For REST APIs
-    },
-    'apigatewayv2': {
-        'api': delete_api # For HTTP and websocket APIs
-    },
-    'autoscaling': {
-        'autoscalinggroup': delete_autoscaling_group
-    },
-    'certificatemanager': {
-        'certificate': lambda resource: print("deleting certificate"),  # delete_certificate(resource['arn'])
-    },
-    'cloudfront': {
-        'distribution': delete_cloudfront_distribution,  # delete_distribution(resource['arn'])
-    },
-    'dynamodb': {
-        'table': delete_dynamodb_table
-    },
-    'ec2': {
-        'ami': deregister_ami,
-        'eip': release_eip,
-        'instance': delete_ec2_instance,
-        'internetgateway': delete_internet_gateway,
-        'natgateway': delete_nat_gateway,  # delete_nat_gateway(resource['arn'])
-        'route': lambda resource: print("deleting route"),  # delete_route(resource['arn'])
-        'routetable': delete_route_table,
-        'security_group': lambda resource: print("deleting security group"),  # delete_security_group(resource['arn'])
-        'snapshot': delete_snapshot,
-        'subnet': delete_subnet,
-        'transitgatewayattachment': lambda resource: print("deleting transit gateway attachment"),  # delete_transit_gateway_vpc_attachment(resource['arn'])
-        'vpc': delete_vpc,
-        'vpcendpoint': delete_vpc_endpoint,
-        'vpcpeering': lambda resource: print("deleting vpc peering"),  # delete_vpc_peering_connection(resource['arn'])
-    },
-    'elasticloadbalancingv2': {
-        'loadbalancer': delete_elastic_load_balancer,
-        'listener': delete_listener,
-        'targetgroup': delete_target_group,
-    },
-    # 'iam': {
-    #     'managedpolicy': lambda resource: print("deleting managed policy"),  # delete_managed_policy(resource['arn'])
-    #     'policy': lambda resource: print("deleting policy"),  # delete_policy(resource['arn'])
-    #     'role': lambda resource: print("deleting role"),  # delete_role(resource['arn'])
-    # },
-    'kms': {
-        'key': lambda resource: print("deleting key"),  # delete_key(resource['arn'])
-    },
-    'lambda': {
-        'function': delete_lambda_function
-    },
-    'rds': {
-        'dbinstance': lambda resource: print("deleting db instance"),  # delete_db_instance(resource['arn'])
-    },
-    'route53': {
-        'hostedzone': lambda resource: print("deleting hosted zone"),  # delete_hosted_zone(resource['arn'])
-    },
-    's3': {
-        'bucket': delete_s3_bucket
-    },
-    'secretsmanager': {
-        'secret': lambda resource: print("deleting secret"),  # delete_secret(resource['arn'])
-    },
-    'sns': {
-        'topic': delete_sns_topic
-    },
-    'sqs': {
-        'queue': delete_sqs_queue
-    }
-}
-
