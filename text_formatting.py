@@ -2,12 +2,17 @@ class Format:
     end = '\033[0m'
     # blue_underline = '\033[34;4;1m'
     blue = '\033[34m'
+    cyan = '\033[36;1m'
     yellow = '\033[33m'
     green = '\033[32m'
     red = '\033[31m'
 
 def header_print(text, indent=0):
     print(Format.blue + ' ' * indent + text + Format.end)
+    print()
+
+def subheader_print(text, indent=4):
+    print(Format.cyan + ' ' * indent + text + Format.end)
     print()
 
 def indent_print(text, indent=4):

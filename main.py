@@ -91,6 +91,10 @@ def parse_resource_by_type(resource):
 
 
 def order_resources_for_deletion(resources):
+
+    # Remove application autoscaling resource from the list
+    resources = [r for r in resources if r.get("service") != "applicationautoscaling"]
+
     # Networking resources that must follow a particular deletion order
     ordered_networking_resources = [
         resource for resource in resources
@@ -170,6 +174,7 @@ def delete_resource(resource):
 # Need to print a statement when all resources have been deleted
 def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
     """Retries failed deletions up to max_retries times with exponential backoff."""
+
     # Separate CloudFront distributions from other resources
     cloudfront_resources = [r for r in failed_resources if r.get("resource_type") == "distribution"]
     other_resources = [r for r in failed_resources if r.get("resource_type") != "distribution"]

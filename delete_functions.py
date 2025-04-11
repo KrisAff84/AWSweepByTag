@@ -18,10 +18,11 @@ import text_formatting as tf
 
 # This has been tested and works. The same logic needs to be updated for the REST API function.
 def delete_api(arn, region):
-    '''
+    """
     Handles HTTP APIs and WebSocket APIs. Checks for any associated VPC links and optionally deletes them.
     If VPC links exist and are deleted, the function waits for them to become inactive or non-existent before proceeding.
-    '''
+    """
+
     client = boto3.client('apigatewayv2', region_name=region)
     api_id = arn.split('/')[-1]
     tf.header_print(f"Deleting API {api_id} in {region}...")
@@ -120,10 +121,11 @@ def delete_api(arn, region):
 
 # TODO: This still needs to be tested.
 def delete_rest_api(arn, region):
-    '''
+    """
     Handles REST APIs. Checks for any associated VPC links and optionally deletes them.
     If VPC links exist and are deleted, the function waits for them to become fully deleted before proceeding.
-    '''
+    """
+
     client = boto3.client('apigateway', region_name=region)
     api_id = arn.split('/')[-1]
     tf.header_print(f"Deleting REST API {api_id} in {region}...")
@@ -218,10 +220,79 @@ def delete_rest_api(arn, region):
 
     print()
 
+################# Application Autoscaling Service ###################
+
+def delete_application_autoscaling(service_namespace, resource_id, region):
+    """
+    Find and delete all Application Autoscaling targets and policies for a given resource.
+
+    Args:
+        service_namespace (str): The namespace of the AWS service.
+        resource_id (str): The ID of the resource to delete policies for. Varies per resource. See boto3 docs for application autoscaling for more info.
+        region (str): The region the resource is in.
+    """
+
+    tf.subheader_print(f"Checking for attached Application Autoscaling Policies and Targets for {resource_id}...")
+    client = boto3.client('application-autoscaling', region_name=region)
+    response = client.describe_scalable_targets(ServiceNamespace=service_namespace, ResourceIds=[resource_id])
+
+    # tf.indent_print("Describe Scalable Targets Response:")
+    # tf.response_print(json.dumps(response, indent=4, default=str))
+
+    if not response['ScalableTargets']:
+        tf.indent_print(f"No scalable targets found for {resource_id}.")
+        return
+
+    # Get scalable dimensions from response - needed for deregister_scalable_target and describe_scaling_policies
+    scalable_dimensions = []
+    for target in response['ScalableTargets']:
+        scalable_dimensions.append(target['ScalableDimension'])
+
+    # Get policy names for each scalable dimension
+    policy_dimension_map = {}
+    for dimension in scalable_dimensions:
+        response = client.describe_scaling_policies(
+            ServiceNamespace=service_namespace,
+            ResourceId=resource_id,
+            ScalableDimension=dimension
+        )
+        policy_names = [policy['PolicyName'] for policy in response.get('ScalingPolicies', [])]
+        if policy_names:
+            policy_dimension_map[dimension] = policy_names
+
+    # Delete policies
+    tf.subheader_print(f"Deleting Application Autoscaling Policies and Targets for {resource_id}...")
+    for dimension, policy_names in policy_dimension_map.items():
+        for policy_name in policy_names:
+            response = client.delete_scaling_policy(
+                PolicyName=policy_name,
+                ServiceNamespace=service_namespace,
+                ResourceId=resource_id,
+                ScalableDimension=dimension
+            )
+            if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+                tf.success_print(f"Successfully deleted scaling policy '{policy_name}' for {dimension}")
+            else:
+                tf.failure_print(f"Failed to delete scaling policy '{policy_name}' for {dimension}")
+            tf.response_print(json.dumps(response, indent=4, default=str))
+
+    # Delete scalable targets
+    for dimension in scalable_dimensions:
+        response = client.deregister_scalable_target(ServiceNamespace=service_namespace, ResourceId=resource_id, ScalableDimension=dimension)
+        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+            tf.success_print(f"Successfully deregistered Application Auto Scaling target for {dimension}.")
+        else:
+            tf.failure_print(f"Failed to deregister Application Auto Scaling target for {dimension}.")
+        tf.response_print(json.dumps(response, indent=4, default=str))
 
 ####################### AutoScaling Service #########################
 
 def delete_autoscaling_group(arn, region):
+    """
+    Deletes an autoscaling group and calls delete_ec2_instance for each instance in the group.
+    After each instance is terminated, it calls ec2_waiter to ensure they are fully terminated.
+    """
+
     tf.header_print(f"Deleting autoscaling group {arn} in {region}...")
     client = boto3.client('autoscaling', region_name=region)
     asg_name = arn.split('/')[-1]
@@ -250,6 +321,12 @@ def delete_autoscaling_group(arn, region):
 ####################### CloudFront Service ##########################
 
 def delete_cloudfront_distribution(arn):
+    """
+    Deletes a CloudFront distribution. If the distribution is not yet fully disabled, it will retry.
+    Retries should not be needed however, because the function that calls this first calls the
+    wait_for_distribution_disabled function, which waits for the distribution to be fully disabled.
+    """
+
     client = boto3.client('cloudfront')
     distribution_id = arn.split('/')[-1]
     tf.header_print(f"Deleting CloudFront distribution {distribution_id}...")
@@ -276,6 +353,12 @@ def delete_cloudfront_distribution(arn):
 
 
 def disable_cloudfront_distribution(arn):
+    """
+    Disables a CloudFront distribution. If distribution is already disabled it will attempt to delete.
+    If deletion is unsuccessful, it will return retry = True to be tried later, upon which wait_for_distribution_disabled
+    will be called before delete_cloudfront_distribution is called again.
+    """
+
     client = boto3.client('cloudfront')
     distribution_id = arn.split('/')[-1]
     tf.header_print(f"Disabling CloudFront distribution {distribution_id}...")
@@ -348,10 +431,14 @@ def delete_dynamodb_table(arn, region):
     tf.header_print(f"Deleting DynamoDB table {arn} in {region}...")
     client = boto3.client('dynamodb', region_name=region)
     table_name = arn.split('/')[-1]
+    service_namespace = 'dynamodb'
+    table_resource_id = f'table/{table_name}'
 
     # Check for deletion protection
     try:
         table_info = client.describe_table(TableName=table_name)['Table']
+        billing_mode = table_info.get('BillingModeSummary', {}).get('BillingMode', 'Unknown')
+
     except client.exceptions.ResourceNotFoundException:
         tf.indent_print(f"Table {table_name} does not exist. It's possible that it has been deleted already.")
         return
@@ -388,6 +475,15 @@ def delete_dynamodb_table(arn, region):
         else:
             tf.failure_print(f"Table {table_name} was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
+
+        if billing_mode == 'PAY_PER_REQUEST':
+            return
+
+        # Delete Application AutoScaling Policies and Targets for the table and its GSI(s) if they exist
+        global_secondary_index_names = [gsi["IndexName"] for gsi in table_info.get("GlobalSecondaryIndexes", [])]
+        delete_application_autoscaling(service_namespace, table_resource_id, region)
+        for gsi in global_secondary_index_names:
+            delete_application_autoscaling(service_namespace, f"table/{table_name}/index/{gsi}", region)
 
     except botocore.exceptions.ClientError as e:
         error_code = e.response['Error']['Code']
