@@ -209,6 +209,9 @@ def delete_resource(resource):
 
     # print(f"DEBUG: Checking DELETE_FUNCTIONS for service='{service}', resource_type='{resource_type}'")
 
+    # CloudFront distributions are handled differently than other resources since disabling them can take several minutes.
+    # The disable_cloudfront_distribution will attempt to delete if it is already disabled, otherwise it will return retry = True
+    # which allows it to be retried later.
     if resource_type == "distribution":
         retry = disable_cloudfront_distribution(arn)
         if retry:
@@ -218,7 +221,6 @@ def delete_resource(resource):
 
     if service in drmap.DELETE_FUNCTIONS and resource_type in drmap.DELETE_FUNCTIONS[service]:
         try:
-            # print(f"DEBUG: Calling delete function for {service}::{resource_type}")
             drmap.DELETE_FUNCTIONS[service][resource_type](arn, region)
 
         except botocore.exceptions.ClientError as e:
@@ -226,7 +228,7 @@ def delete_resource(resource):
 
             if error_code == "DependencyViolation":
                 print(f"DEBUG: Dependency violation detected for {arn}, retrying later...")
-                return resource  # Now it will be retried
+                return resource  # Return to main function for retry
 
             print(f"Failed to delete {arn}, error: {e}")
             return None

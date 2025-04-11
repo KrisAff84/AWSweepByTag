@@ -176,11 +176,16 @@ def delete_api(arn: str, region: str) -> None:
             tf.failure_print("Some VPC links may still be active. Please check manually")
     print()
 
-# TODO: This still needs to be tested.
-def delete_rest_api(arn, region):
+# TODO: This still needs to be tested with the VPC link logic, although the REST API has been confirmed to delete successfully
+def delete_rest_api(arn: str, region: str) -> None:
     """
-    Handles REST APIs. Checks for any associated VPC links and optionally deletes them.
+    Delete REST API from API GW in a given region.
+
     If VPC links exist and are deleted, the function waits for them to become fully deleted before proceeding.
+
+    Args:
+        arn (str): The ARN of the API to delete
+        region (str): The AWS region where the API is located
     """
 
     client = boto3.client('apigateway', region_name=region)
@@ -279,9 +284,11 @@ def delete_rest_api(arn, region):
 
 ################# Application Autoscaling Service ###################
 
-def delete_application_autoscaling(service_namespace, resource_id, region):
+def delete_application_autoscaling(service_namespace: str, resource_id: str, region: str) -> None:
     """
     Find and delete all Application Autoscaling targets and policies for a given resource.
+
+    Called from other delete functions when the resource could potentially have application autoscaling enabled.
 
     Args:
         service_namespace (str): The namespace of the AWS service.
@@ -344,10 +351,18 @@ def delete_application_autoscaling(service_namespace, resource_id, region):
 
 ####################### AutoScaling Service #########################
 
-def delete_autoscaling_group(arn, region):
+def delete_autoscaling_group(arn: str, region: str) -> None:
     """
-    Deletes an autoscaling group and calls delete_ec2_instance for each instance in the group.
+    Delete an autoscaling group and terminate all instances in the group
+
     After each instance is terminated, it calls ec2_waiter to ensure they are fully terminated.
+    The step to delete instances seems redundant, but this is done to speed up the process, as
+    there is often a lag between deleting an autoscaling group and when instances are actually
+    terminated.
+
+    Args:
+        arn (str): The ARN of the autoscaling group to delete
+        region (str): The region the autoscaling group is in
     """
 
     tf.header_print(f"Deleting autoscaling group {arn} in {region}...")
@@ -377,11 +392,17 @@ def delete_autoscaling_group(arn, region):
 
 ####################### CloudFront Service ##########################
 
-def delete_cloudfront_distribution(arn):
+def delete_cloudfront_distribution(arn: str) -> None:
     """
-    Deletes a CloudFront distribution. If the distribution is not yet fully disabled, it will retry.
-    Retries should not be needed however, because the function that calls this first calls the
-    wait_for_distribution_disabled function, which waits for the distribution to be fully disabled.
+    Delete a CloudFront distribution
+
+    If the distribution is not yet fully disabled, it will be retried by the retry_failed_deletions
+    function. Retries should not be needed however, because the function that calls this first calls the
+    wait_for_distribution_disabled function. Before attempting to delete a get_distribution request is
+    made first to retrieve the latest ETag, which is required for the delete_distribution request.
+
+    Args:
+        arn (str): The ARN of the CloudFront distribution to delete
     """
 
     client = boto3.client('cloudfront')
@@ -403,17 +424,26 @@ def delete_cloudfront_distribution(arn):
         else:
             tf.failure_print(f"CloudFront distribution {arn} was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
-    except client.exceptions.DistributionNotDisabled:
-        tf.indent_print(f"Distribution {distribution_id} is not yet fully disabled. Will be retried later.\n")
+
     except Exception as e:
-        tf.failure_print(f"Error deleting distribution {distribution_id}: {str(e)}\n")
+        tf.failure_print(f"Delete error (CloudFront {distribution_id}): {str(e)}\n")
+        raise
 
 
-def disable_cloudfront_distribution(arn):
+def disable_cloudfront_distribution(arn: str) -> bool:
     """
-    Disables a CloudFront distribution. If distribution is already disabled it will attempt to delete.
-    If deletion is unsuccessful, it will return retry = True to be tried later, upon which wait_for_distribution_disabled
+    Disable a CloudFront distribution
+
+    If distribution is already disabled it will attempt to delete.
+    If deletion is unsuccessful, or if the distribution is not already disabled
+    it will return retry = True to be tried later, upon which wait_for_distribution_disabled
     will be called before delete_cloudfront_distribution is called again.
+
+    Args:
+        arn (str): The ARN of the CloudFront distribution to disable
+
+    Returns:
+        bool - True if the distribution needs to be retried for deletion
     """
 
     client = boto3.client('cloudfront')
@@ -463,7 +493,14 @@ def disable_cloudfront_distribution(arn):
     return retry
 
 
-def wait_for_distribution_disabled(arn):
+def wait_for_distribution_disabled(arn: str) -> None:
+    """
+    Wait for a CloudFront distribution to be fully disabled
+
+    Args:
+        arn (str): The arn of the CloudFront distribution to wait for
+    """
+
     client = boto3.client('cloudfront')
     distribution_id = arn.split('/')[-1]
     tf.header_print(f"Waiting for CloudFront distribution {distribution_id} to be disabled...")
@@ -480,11 +517,23 @@ def wait_for_distribution_disabled(arn):
 
 ######################## DynamoDB Service ###########################
 
-def delete_dynamodb_table(arn, region):
+def delete_dynamodb_table(arn: str, region: str) -> None:
     """
-    Deletes a DynamoDB table. If the table has deletion protection or items,
-    the user will be prompted before proceeding.
+    Delete a DynamoDB table.
+
+    If the table has deletion protection or items, the user will be prompted before proceeding.
+    1. Table is checked for billing mode and deletion protection
+    2. If deletion protection is enabled, user is warned and prompted to disable it
+    3. Deletion protection is disabled if user confirms
+    4. Table is checked for items by a scan with a limit of 1
+    5. If items are found, user is warned and prompted to delete them and the table
+    6. If billing mode is PROVISIONED, application autoscaling policies and targets are checked for and deleted
+
+    Args:
+        arn (str): The ARN of the DynamoDB table to delete
+        region (str): The region the DynamoDB table is in
     """
+
     tf.header_print(f"Deleting DynamoDB table {arn} in {region}...")
     client = boto3.client('dynamodb', region_name=region)
     table_name = arn.split('/')[-1]
@@ -556,18 +605,37 @@ def delete_dynamodb_table(arn, region):
 
 ########################### EC2 Service #############################
 
-def deregister_ami(arn, region):
-    tf.header_print(f"Deregistering AMI {arn} in {region}...")
+def deregister_ami(ami_id: str, region: str) -> None:
+    """Deregister and AMI in a given region by ami_id."""
+
+    tf.header_print(f"Deregistering AMI {ami_id} in {region}...")
     client = boto3.client('ec2', region_name=region)
-    response = client.deregister_image(ImageId=arn)
+    response = client.deregister_image(ImageId=ami_id)
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.success_print(f"AMI {arn} was successfully deregistered")
+        tf.success_print(f"AMI {ami_id} was successfully deregistered")
     else:
-        tf.failure_print(f"AMI {arn} was not successfully deregistered")
+        tf.failure_print(f"AMI {ami_id} was not successfully deregistered")
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-def delete_ec2_instance(arn, region, autoscaling=False):
+def delete_ec2_instance(arn: str, region: str, autoscaling: bool=False) -> None:
+    """
+    Terminate an EC2 instance in a given region by a given ARN
+
+    Can be called by the main delete function or by delete_autoscaling_group. A describe_instance
+    request is first made to check if the instance exists and has not already been terminated.
+    If it hasn't, the termination request is made. If the instance was not terminated as part of
+    an autoscaling group deletion, the ec2_waiter function is called to ensure the instance is
+    fully terminated to avoid any dependency issues. If the instance was terminated as part of an
+    autoscaling group deletion, the ec2_waiter function is called by the delete_autoscaling_group
+    function instead.
+
+    Args:
+        arn (str): The ARN of the EC2 instance to terminate
+        region (str): The region the EC2 instance is in
+        autoscaling (bool, optional): Whether or not the function was called by delete_autoscaling_group. Defaults to False.
+    """
+
     client = boto3.client('ec2', region_name=region)
     instance_id = arn.split('/')[-1]
 
@@ -611,7 +679,9 @@ def delete_ec2_instance(arn, region, autoscaling=False):
         print()
 
 
-def ec2_waiter(instance_ids, region):
+def ec2_waiter(instance_ids: list[str], region: str) -> None:
+    """Wait for list of EC2 instances to be fully terminated."""
+
     client = boto3.client('ec2', region_name=region)
     waiter = client.get_waiter('instance_terminated')
     waiter.wait(
@@ -623,7 +693,9 @@ def ec2_waiter(instance_ids, region):
     )
 
 
-def release_eip(arn, region):
+def release_eip(arn: str, region: str) -> None:
+    """Release an elastic IP address in a given region by ARN."""
+
     tf.header_print(f"Releasing Elastic IP {arn} in {region}...")
     client = boto3.client('ec2', region_name=region)
     allocation_id = arn.split('/')[-1]
@@ -635,7 +707,18 @@ def release_eip(arn, region):
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-def delete_internet_gateway(arn, region):
+def delete_internet_gateway(arn: str, region: str) -> None:
+    """
+    Delete an internet gateway in a given region by ARN.
+
+    Checks for any attached VPCs and detaches the gateway from the VPC before deleting it.
+    If no VPCs are attached, the gateway is deleted immediately.
+
+    Args:
+        arn (str): The ARN of the internet gateway to delete
+        region (str): The region the internet gateway is in
+    """
+
     client = boto3.client('ec2', region_name=region)
     gateway_id = arn.split('/')[-1]
     tf.header_print(f"Deleting Internet Gateway {gateway_id} in {region}...")
@@ -672,11 +755,25 @@ def delete_internet_gateway(arn, region):
         tf.failure_print(f"Failed to delete {gateway_id}: {str(e)}\n")
 
 
-def delete_nat_gateway(arn, region):
+def delete_nat_gateway(arn: str, region: str) -> None:
+    """
+    Delete a NAT gateway in a given region by ARN.
+
+    First checks to see if NAT Gateway was already deleted, or is in the process of deleting. If the
+    NAT Gateway has not already been deleted, the function will initiate the deletion process and
+    use a waiter to wait for the NAT GW to be fully deleted.
+
+    Args:
+        arn (str): The ARN of the NAT gateway to delete
+        region (str): The region the NAT gateway is in
+    """
+
     client = boto3.client('ec2', region_name=region)
     nat_gateway_id = arn.split('/')[-1]
     tf.header_print(f"Deleting Nat Gateway {nat_gateway_id} in {region}...")
     deleted = client.describe_nat_gateways(NatGatewayIds=[nat_gateway_id])['NatGateways'][0]['State']
+
+    # consider calling the waiter here if status is 'deleting'
     if deleted == 'deleted' or deleted == 'deleting':
         tf.success_print(f"Nat gateway {nat_gateway_id} was already deleted")
         return
@@ -699,7 +796,9 @@ def delete_nat_gateway(arn, region):
         return
 
 
-def delete_route_table(arn, region):
+def delete_route_table(arn: str, region: str) -> None:
+    """Delete a route table in a given region by ARN."""
+
     client = boto3.client('ec2', region_name=region)
     route_table_id = arn.split('/')[-1]
     tf.header_print(f"Deleting route table {route_table_id} in {region}...")
@@ -712,7 +811,9 @@ def delete_route_table(arn, region):
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-def delete_snapshot(arn, region):
+def delete_snapshot(arn: str, region: str) -> None:
+    """Delete a snapshot in a given region by ARN."""
+
     tf.header_print(f"Deleting snapshot {arn} in {region}...")
     client = boto3.client('ec2', region_name=region)
     response = client.delete_snapshot(SnapshotId=arn)
@@ -724,7 +825,19 @@ def delete_snapshot(arn, region):
 
 
 # TODO: Add a check for hanging ENIs
-def delete_subnet(arn, region):
+def delete_subnet(arn: str, region: str) -> None:
+    """
+    Delete a subnet in a given region by ARN.
+
+    1. Checks for any route tables associations that may exist
+    2. Disassociates the subnet from any route tables if the associations exist
+    3. Deletes subnet
+
+    Args:
+        arn (str): The ARN of the subnet to delete
+        region (str): The region the subnet is in
+    """
+
     client = boto3.client('ec2', region_name=region)
     subnet_id = arn.split('/')[-1]
 
@@ -785,7 +898,18 @@ def delete_subnet(arn, region):
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-def delete_vpc_endpoint(arn, region):
+def delete_vpc_endpoint(arn: str, region: str) -> None:
+    """
+    Delete a VPC endpoint in a given region by ARN
+
+    If deletion is unsuccessful, a check is made to see if the VPC endpoint was already deleted.
+    If it was, a success message is printed, otherwise the error is printed.
+
+    Args:
+        arn (str): The ARN of the VPC endpoint to delete
+        region (str): The region the VPC endpoint is in
+    """
+
     client = boto3.client('ec2', region_name=region)
     endpoint_id = arn.split('/')[-1]
     tf.header_print(f"Deleting VPC endpoint {endpoint_id} in {region}...")
@@ -796,7 +920,7 @@ def delete_vpc_endpoint(arn, region):
             for error in response['Unsuccessful']:
                 error_code = error.get('Error', {}).get('Code')
                 error_msg = error.get('Error', {}).get('Message', 'No message provided')
-                resource_id = error.get('ResourceId', endpoint_id)  # fallback to the one you passed in
+                resource_id = error.get('ResourceId', endpoint_id)
 
                 # Handle specific known error
                 if error_code == 'InvalidVpcEndpoint.NotFound':
@@ -818,13 +942,26 @@ def delete_vpc_endpoint(arn, region):
         return None
 
 
-def delete_vpc(arn, region):
+def delete_vpc(arn: str, region: str) -> None:
+    """
+    Deletes a VPC and all of its security groups in a given region by ARN
+
+    First checks to see if the VPC contains any security groups and deletes them first.
+    Then the VPC is deleted.
+
+    Args:
+        arn (str): The ARN of the VPC to delete
+        region (str): The region the VPC is in
+    """
+
     client = boto3.client('ec2', region_name=region)
     vpc_id = arn.split('/')[-1]
     tf.header_print(f"Deleting VPC {vpc_id} in {region}...")
     tf.indent_print((f"Checking VPC {vpc_id} for security groups...\n"))
+
     response = client.describe_security_groups(Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}])
     security_groups = response['SecurityGroups']
+
     for sg in security_groups:
         if sg['GroupName'] == 'default':
             continue
