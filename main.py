@@ -2,86 +2,163 @@ import json
 import time
 import boto3
 import botocore.exceptions
-from delete_functions import DELETE_FUNCTIONS, disable_cloudfront_distribution, wait_for_distribution_disabled, delete_cloudfront_distribution
+import delete_resource_map as drmap
+from delete_functions import disable_cloudfront_distribution, wait_for_distribution_disabled, delete_cloudfront_distribution
 import get_other_ids
+import text_formatting as tf
 
 
-def get_resources_by_tag(tag_key, tag_value):
-    '''' Gets list of resources by common tag key and value. '''
-    client = boto3.client('resource-groups')
+def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> list[dict[str, str]]:
+    """
+    Get list of resources by common tag key and value.
 
-    query = {
-        "Type": "TAG_FILTERS_1_0",
-        "Query": json.dumps({
-            "ResourceTypeFilters": [
-                "AWS::AllSupported",
-            ],
-            "TagFilters": [
-                {
-                    "Key": tag_key,
-                    "Values": [tag_value]
-                }
-            ]
-        })
-    }
+    Accepts a tag key and value, as well as a list of regions to search for resources in.
+    The function then calls the resource-groups client to search for resources with the
+    given tag key and value for each region provided. All required arguments are retrieved
+    and passed through prompts in the main function.
+
+    Args:
+        tag_key (str): Tag key to search for resources by.
+        tag_value (str): Tag value to search for resources by.
+        regions (list[str]): List of regions to search for resources in.
+
+    Returns:
+        list[dict[str, str]] - List of dictionaries containing resource information.
+            \nEach dictionary contains the following keys:
+                - ResourceArn (str): ARN of the resource.
+                - ResourceType (str): Type of the resource.
+                - Region (str): Region where the resource is located.
+    """
 
     resources = []
-    response = client.search_resources(ResourceQuery=query)
-    while True:
-        resources.extend(response.get('ResourceIdentifiers', []))
-        next_token = response.get('NextToken')
+    for region in regions:
 
-        if not next_token:
-            break
+        client = boto3.client('resource-groups', region_name=region)
 
-        response = client.search_resources(ResourceQuery=query, NextToken=next_token)
-
-    asgclient = boto3.client('autoscaling')
-    autoscaling_groups = asgclient.describe_auto_scaling_groups(
-        Filters=[
-            {
-                'Name': 'tag:{}'.format(tag_key),
-                'Values': [tag_value]
-            }
-        ]
-    )
-
-    for asg in autoscaling_groups.get("AutoScalingGroups", []):
-        asg_arn = asg["AutoScalingGroupARN"]
-        resource = {
-            "ResourceArn": asg_arn,
-            "ResourceType": "AWS::AutoScaling::AutoScalingGroup",
+        query = {
+            "Type": "TAG_FILTERS_1_0",
+            "Query": json.dumps({
+                "ResourceTypeFilters": ["AWS::AllSupported"],
+                "TagFilters": [{
+                    "Key": tag_key,
+                    "Values": [tag_value]
+                }]
+            })
         }
-        resources.append(resource)
+
+        try:
+            response = client.search_resources(ResourceQuery=query)
+            # print(f"DEBUG - Original response:{json.dumps(response, indent=4, default=str)}")
+            while True:
+                for res in response.get('ResourceIdentifiers', []):
+                    res['Region'] = region
+                    resources.append(res)
+
+                next_token = response.get('NextToken')
+                if not next_token:
+                    break
+
+                response = client.search_resources(ResourceQuery=query, NextToken=next_token)
+        except botocore.exceptions.ClientError as e:
+            print(f"Error querying resources in region {region}: {e}")
+            continue
+
+        # This should be placed in its own function and called with get_other_resources
+        # Autoscaling Groups - handled separately
+        asgclient = boto3.client('autoscaling', region_name=region)
+        try:
+            autoscaling_groups = asgclient.describe_auto_scaling_groups(
+                Filters=[{
+                    'Name': f'tag:{tag_key}',
+                    'Values': [tag_value]
+                }]
+            ).get("AutoScalingGroups", [])
+
+            for asg in autoscaling_groups:
+                resources.append({
+                    "ResourceArn": asg["AutoScalingGroupARN"],
+                    "ResourceType": "AWS::AutoScaling::AutoScalingGroup",
+                    "Region": region
+                })
+        except botocore.exceptions.ClientError as e:
+            print(f"Error querying ASGs in region {region}: {e}")
+
+    # print(f"DEBUG: - Modified response:{json.dumps(resources, indent=4, default=str)}")
+
     return resources
 
 
-def get_other_resources(tag_key, tag_value):
-    '''
-    Gets other resources that are not present when using the 'resource-groups' client.
-    '''
+def get_other_resources(tag_key: str, tag_value: str, regions: list[str]) -> list[dict[str, str]]:
+    """
+    Get other resources that are not present when using the 'resource-groups' client.
+
+    Calls various other functions that can obtain resource information by tag key and
+    value, even if they are not present when using the 'resource-groups' client. Presently
+    it only calls the get_images function, which retrieves images and snapshots by tag.
+    Other resources may be added in the future as needed.
+
+    Args:
+        tag_key (str): Tag key.
+        tag_value (str): Tag value.
+        regions (list[str]): List of regions to search for resources in.
+
+    Returns:
+        list[dict[str, str]] - List of dictionaries containing resource information.
+            \nEach dictionary contains the following keys:
+            - resource_type (str): Type of the resource.
+            - resource_id (str): ID of the resource. Present if arn is not.
+            - arn (str): ARN of the resource. Present if resource_id is not.
+            - service (str): Service that the resource belongs to.
+            - region (str): Region where the resource is located.
+    """
 
     resources = []
-    images_and_snapshots = get_other_ids.get_images(tag_key, tag_value)
+    images_and_snapshots = get_other_ids.get_images(tag_key, tag_value, regions)
     resources.extend(images_and_snapshots)
 
     return resources
 
 
-def parse_resource_by_type(resource):
-    """Parses resource type, service and ARN from each resource to find the appropriate delete function."""
+def parse_resource_by_type(resource: dict[str, str]) -> dict[str, str]:
+    """
+    Parse resource by type, ARN, service, and region to return a standardized dictionary
+
+    Parsing is needed so that each resource can be mapped to the appropriate deletion function
+
+    Args:
+        resource (dict[str, str]): Dictionary containing resource information.
+            \nThe resource dictionary should contain the following keys:
+            - ResourceArn (str): ARN of the resource.
+            - ResourceType (str): Type of the resource.
+            - Region (str): Region where the resource is located.
+
+    Returns:
+        dict[str, str] - Dictionary containing parsed resource information.
+            \nEach dictionary contains the following keys:
+            - resource_type (str): Type of the resource.
+            - arn (str): ARN of the resource.
+            - service (str): Service that the resource belongs to.
+            - region (str): Region where the resource is located.
+    """
+
     arn = resource['ResourceArn']
     service = (resource['ResourceType'].split('::')[1]).lower()
     resource_type = (resource['ResourceType'].split('::')[2]).lower()
+    region = resource['Region']
     resource_for_deletion = {
         'resource_type': resource_type,
         'arn': arn,
-        'service': service
+        'service': service,
+        'region': region
     }
     return resource_for_deletion
 
 
 def order_resources_for_deletion(resources):
+
+    # Remove application autoscaling resource from the list
+    resources = [r for r in resources if r.get("service") != "applicationautoscaling"]
+
     # Networking resources that must follow a particular deletion order
     ordered_networking_resources = [
         resource for resource in resources
@@ -128,6 +205,7 @@ def delete_resource(resource):
     service = resource['service']
     resource_type = resource['resource_type']
     arn = resource.get('arn') or resource.get('resource_id')
+    region = resource['region']
 
     # print(f"DEBUG: Checking DELETE_FUNCTIONS for service='{service}', resource_type='{resource_type}'")
 
@@ -138,10 +216,10 @@ def delete_resource(resource):
         else:
             return
 
-    if service in DELETE_FUNCTIONS and resource_type in DELETE_FUNCTIONS[service]:
+    if service in drmap.DELETE_FUNCTIONS and resource_type in drmap.DELETE_FUNCTIONS[service]:
         try:
             # print(f"DEBUG: Calling delete function for {service}::{resource_type}")
-            DELETE_FUNCTIONS[service][resource_type](arn)
+            drmap.DELETE_FUNCTIONS[service][resource_type](arn, region)
 
         except botocore.exceptions.ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
@@ -160,6 +238,7 @@ def delete_resource(resource):
 # Need to print a statement when all resources have been deleted
 def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
     """Retries failed deletions up to max_retries times with exponential backoff."""
+
     # Separate CloudFront distributions from other resources
     cloudfront_resources = [r for r in failed_resources if r.get("resource_type") == "distribution"]
     other_resources = [r for r in failed_resources if r.get("resource_type") != "distribution"]
@@ -211,16 +290,18 @@ def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
 def main():
     tag_key = input("Enter the tag key to search by: ")
     tag_value = input("Enter the tag value to search by: ")
-    resources = get_resources_by_tag(tag_key, tag_value)
+    regions = [r.strip() for r in input("Which region(s) would you like to search? (separate multiple regions with commas): ").lower().split(',')]
 
-    print("\n Resources queued for deletion: \n")
+    resources = get_resources_by_tag(tag_key, tag_value, regions)
+
+    tf.header_print("\nResources queued for deletion:\n")
     resources_for_deletion = []
 
     for resource in resources:
         resource_for_deletion = parse_resource_by_type(resource)
         resources_for_deletion.append(resource_for_deletion)
 
-    other_resources_for_deletion = get_other_resources(tag_key, tag_value)
+    other_resources_for_deletion = get_other_resources(tag_key, tag_value, regions)
     resources_for_deletion.extend(other_resources_for_deletion)
     ordered_resources_for_deletion = order_resources_for_deletion(resources_for_deletion)
     print(json.dumps(ordered_resources_for_deletion, indent=4, default=str))
