@@ -24,7 +24,7 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
 
     Returns:
         list[dict[str, str]] - List of dictionaries containing resource information.
-            Each dictionary contains the following keys:
+            \nEach dictionary contains the following keys:
                 - ResourceArn (str): ARN of the resource.
                 - ResourceType (str): Type of the resource.
                 - Region (str): Region where the resource is located.
@@ -48,7 +48,7 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
 
         try:
             response = client.search_resources(ResourceQuery=query)
-            print(f"DEBUG - Original response:{json.dumps(response, indent=4, default=str)}")
+            # print(f"DEBUG - Original response:{json.dumps(response, indent=4, default=str)}")
             while True:
                 for res in response.get('ResourceIdentifiers', []):
                     res['Region'] = region
@@ -63,7 +63,7 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
             print(f"Error querying resources in region {region}: {e}")
             continue
 
-
+        # This should be placed in its own function and called with get_other_resources
         # Autoscaling Groups - handled separately
         asgclient = boto3.client('autoscaling', region_name=region)
         try:
@@ -83,7 +83,7 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
         except botocore.exceptions.ClientError as e:
             print(f"Error querying ASGs in region {region}: {e}")
 
-    print(f"DEBUG: - Modified response:{json.dumps(resources, indent=4, default=str)}")
+    # print(f"DEBUG: - Modified response:{json.dumps(resources, indent=4, default=str)}")
 
     return resources
 
@@ -104,9 +104,11 @@ def get_other_resources(tag_key: str, tag_value: str, regions: list[str]) -> lis
 
     Returns:
         list[dict[str, str]] - List of dictionaries containing resource information.
-            Each dictionary contains the following keys:
-            - resource_id (str): ID of the resource.
+            \nEach dictionary contains the following keys:
             - resource_type (str): Type of the resource.
+            - resource_id (str): ID of the resource. Present if arn is not.
+            - arn (str): ARN of the resource. Present if resource_id is not.
+            - service (str): Service that the resource belongs to.
             - region (str): Region where the resource is located.
     """
 
@@ -118,13 +120,27 @@ def get_other_resources(tag_key: str, tag_value: str, regions: list[str]) -> lis
 
 
 def parse_resource_by_type(resource: dict[str, str]) -> dict[str, str]:
-    """Parse resource by type, ARN, service, and region to return a standardized dictionary.
+    """
+    Parse resource by type, ARN, service, and region to return a standardized dictionary
 
-    Parse the resource type
+    Parsing is needed so that each resource can be mapped to the appropriate deletion function
 
     Args:
+        resource (dict[str, str]): Dictionary containing resource information.
+            \nThe resource dictionary should contain the following keys:
+            - ResourceArn (str): ARN of the resource.
+            - ResourceType (str): Type of the resource.
+            - Region (str): Region where the resource is located.
 
+    Returns:
+        dict[str, str] - Dictionary containing parsed resource information.
+            \nEach dictionary contains the following keys:
+            - resource_type (str): Type of the resource.
+            - arn (str): ARN of the resource.
+            - service (str): Service that the resource belongs to.
+            - region (str): Region where the resource is located.
     """
+
     arn = resource['ResourceArn']
     service = (resource['ResourceType'].split('::')[1]).lower()
     resource_type = (resource['ResourceType'].split('::')[2]).lower()

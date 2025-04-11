@@ -1,3 +1,18 @@
+"""
+Text formatting functions for terminal output
+
+Functions:
+    header_print(text, indent) -> None
+    subheader_print(text, indent) -> None
+    indent_print(text, indent) -> None
+    success_print(text, indent) -> None
+    failure_print(text, indent) -> None
+    response_print(text, indent) -> None
+    prompt(text, indent) -> str
+    warning_confirmation(text, indent) -> str
+"""
+
+
 class Format:
     """Color codes to use for text formatting."""
     end = '\033[0m'
