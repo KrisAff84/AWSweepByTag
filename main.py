@@ -7,8 +7,28 @@ import get_other_ids
 import text_formatting as tf
 
 
-def get_resources_by_tag(tag_key, tag_value, regions):
-    '''' Gets list of resources by common tag key and value. '''
+def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> list[dict[str, str]]:
+    """
+    Get list of resources by common tag key and value.
+
+    Accepts a tag key and value, as well as a list of regions to search for resources in.
+    The function then calls the resource-groups client to search for resources with the
+    given tag key and value for each region provided. All required arguments are retrieved
+    and passed through prompts in the main function.
+
+    Args:
+        tag_key (str): Tag key to search for resources by.
+        tag_value (str): Tag value to search for resources by.
+        regions (list[str]): List of regions to search for resources in.
+
+    Returns:
+        list[dict[str, str]] - List of dictionaries containing resource information.
+            Each dictionary contains the following keys:
+                - ResourceArn (str): ARN of the resource.
+                - ResourceType (str): Type of the resource.
+                - Region (str): Region where the resource is located.
+    """
+
     resources = []
     for region in regions:
 
@@ -60,13 +80,32 @@ def get_resources_by_tag(tag_key, tag_value, regions):
         except botocore.exceptions.ClientError as e:
             print(f"Error querying ASGs in region {region}: {e}")
 
+    print(f"DEBUG: {json.dumps(resources, indent=4, default=str)}")
+
     return resources
 
 
-def get_other_resources(tag_key, tag_value, regions):
-    '''
-    Gets other resources that are not present when using the 'resource-groups' client.
-    '''
+def get_other_resources(tag_key: str, tag_value: str, regions: list[str]) -> list[dict[str, str]]:
+    """
+    Get other resources that are not present when using the 'resource-groups' client.
+
+    Calls various other functions that can obtain resource information by tag key and
+    value, even if they are not present when using the 'resource-groups' client. Presently
+    it only calls the get_images function, which retrieves images and snapshots by tag.
+    Other resources may be added in the future as needed.
+
+    Args:
+        tag_key (str): Tag key.
+        tag_value (str): Tag value.
+        regions (list[str]): List of regions to search for resources in.
+
+    Returns:
+        list[dict[str, str]] - List of dictionaries containing resource information.
+            Each dictionary contains the following keys:
+            - resource_id (str): ID of the resource.
+            - resource_type (str): Type of the resource.
+            - region (str): Region where the resource is located.
+    """
 
     resources = []
     images_and_snapshots = get_other_ids.get_images(tag_key, tag_value, regions)
@@ -75,8 +114,14 @@ def get_other_resources(tag_key, tag_value, regions):
     return resources
 
 
-def parse_resource_by_type(resource):
-    """Parses resource type, service and ARN from each resource to find the appropriate delete function."""
+def parse_resource_by_type(resource: dict[str, str]) -> dict[str, str]:
+    """Parse resource by type, ARN, service, and region to return a standardized dictionary.
+
+    Parse the resource type
+
+    Args:
+
+    """
     arn = resource['ResourceArn']
     service = (resource['ResourceType'].split('::')[1]).lower()
     resource_type = (resource['ResourceType'].split('::')[2]).lower()
