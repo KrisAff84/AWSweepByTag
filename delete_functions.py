@@ -105,6 +105,7 @@ def delete_api(arn: str, region: str) -> None:
         tf.response_print(json.dumps(response, indent=4, default=str))
     except botocore.exceptions.ClientError as e:
         tf.failure_print(f"Failed to delete API {arn}: {e}\n")
+        raise
 
     print()
     # Ask if user wants to delete associated VPC links if there are any
@@ -516,6 +517,16 @@ def wait_for_distribution_disabled(arn: str) -> None:
     print()
 
 ######################## DynamoDB Service ###########################
+
+def create_dynamodb_table_backup(arn: str, region: str) -> str:
+    """
+    Create a backup of a DynamoDB table
+
+    Needs to be optionally called after a prompt in the delete_dynamodb_table function
+    after giving warning about table not being empty.
+    """
+    pass
+
 
 def delete_dynamodb_table(arn: str, region: str) -> None:
     """

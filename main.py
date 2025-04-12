@@ -226,15 +226,24 @@ def delete_resource(resource):
         except botocore.exceptions.ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
 
-            if error_code == "DependencyViolation":
-                print(f"DEBUG: Dependency violation detected for {arn}, retrying later...")
+            # These exceptions will not be handled by the retry function since they indicate the resource does not exist
+            if error_code in ["NotFoundException", "NoSuchEntity", "ResourceNotFoundException"]:
+                tf.indent_print(f"Resource '{arn}' not found. It may have already been deleted. Skipping...")
+                return None
+
+            # These exceptions will be handled by the retry function
+            if error_code in ["DependencyViolation", "TooManyRequestsException", "ThrottlingException", "ServiceUnavailableException"]:
+                tf.failure_print(f"Resource '{arn}' could not be deleted due to a {error_code}. Retrying later...")
                 return resource  # Return to main function for retry
 
-            print(f"Failed to delete {arn}, error: {e}")
-            return None
+            # Unknown exceptions to be handled by retry function for good measure
+            tf.failure_print(f"Resource '{arn}' could not be deleted. Error:")
+            tf.indent_print(e, 6)
+            tf.indent_print("Retrying later...")
+            return resource
 
     else:
-        print(f"No delete function found for {service}::{resource_type}. Resource must be deleted manually")
+        tf.header_print(f"No delete function found for {service}::{resource_type}. Resource must be deleted manually\n")
         return None
 
 # Need to print a statement when all resources have been deleted
