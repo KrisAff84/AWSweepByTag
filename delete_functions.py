@@ -986,11 +986,22 @@ def delete_vpc(arn: str, region: str) -> None:
 
 ########################## ELBv2 Service ############################
 
-def delete_elastic_load_balancer(arn, region):
-    '''
-    Deletes ELB as well as any listeners and target groups.
-    Handles all types of ELBs besides classic.
-    '''
+def delete_elastic_load_balancer(arn: str, region: str) -> None:
+    """
+    Delete an Elastic Load Balancer in a given region by ARN
+
+    1. Checks to see if the ELB has any listeners or target groups associated with it
+    2  Checks to see if the target groups are attached to other ELBs
+    3. If target groups are attached to other ELBs, the ELB will not be deleted
+    4. User is prompted to confirm deletion of listeners and target groups
+    5. If target groups are not attached to other ELBs and confirmation is given: the listeners, target groups and finally the ELB are deleted
+    6. After deletion is initiated, a waiter is used to ensure the ELB is fully deleted before exiting the function
+
+    Args:
+        arn (str): The ARN of the ELB to delete
+        region (str): The region the ELB is in
+    """
+
     tf.header_print(f"Deleting ELB {arn} in {region}...")
     client = boto3.client('elbv2', region_name=region)
 
@@ -1030,13 +1041,14 @@ def delete_elastic_load_balancer(arn, region):
     for tg in target_group_arns:
         tf.indent_print(tg, indent=8)
     print()
-    delete_tgs_and_listeners = tf.prompt("Proceed?")
+    delete_tgs_and_listeners = tf.prompt("Proceed with deletion process?")
 
     if delete_tgs_and_listeners != 'y':
         tf.indent_print("Skipping ELB deletion...")
         return
 
     # Delete listeners
+    # TODO: Modify to use the delete_listener function instead
     tf.indent_print("Deleting target groups and listeners...")
     for listener in listener_arns:
         response = client.delete_listener(ListenerArn=listener)
@@ -1047,6 +1059,8 @@ def delete_elastic_load_balancer(arn, region):
         tf.response_print(json.dumps(response, indent=4, default=str))
 
     # Delete target groups
+    # TODO: Modify to use the delete_target_group function instead
+    tf.indent_print("Deleting target groups...")
     for tg in target_group_arns:
         response = client.delete_target_group(TargetGroupArn=tg)
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -1079,8 +1093,17 @@ def delete_elastic_load_balancer(arn, region):
 
     print()
 
+# TODO: This should probably be modified to be able to be called from the delete ELB function as well
+# Can be achieved by modifying the header print statement to be a subheader if called by delete ELB
+def delete_listener(arn: str, region: str) -> None:
+    """
+    Delete listener in a given region by ARN
 
-def delete_listener(arn, region):
+    Args:
+        arn (str): The ARN of the listener to delete
+        region (str): The region the listener is in
+    """
+
     client = boto3.client('elbv2', region_name=region)
     try:
         tf.header_print(f"Deleting listener {arn} in {region}...")
@@ -1096,8 +1119,16 @@ def delete_listener(arn, region):
 
     print()
 
+# TODO: This should probably be modified to be able to be called from the delete ELB function as well
+# Can be achieved by modifying the header print statement to be a subheader if called by delete ELB
+def delete_target_group(arn: str, region: str) -> None:
+    """
+    Delete target group in a given region by ARN
 
-def delete_target_group(arn, region):
+    Args:
+        arn (str): The ARN of the target group to delete
+        region (str): The region the target group is in
+    """
     client = boto3.client('elbv2', region_name=region)
     try:
         tf.header_print(f"Deleting target group {arn} in {region}...")
@@ -1117,7 +1148,7 @@ def delete_target_group(arn, region):
 
 ######################### Lambda Service ############################
 
-def delete_lambda_function(arn, region):
+def delete_lambda_function(arn: str, region: str) -> None:
     tf.header_print(f"Deleting Lambda function {arn} in {region}...")
     client = boto3.client('lambda', region_name=region)
     response = client.delete_function(FunctionName=arn)
@@ -1131,7 +1162,7 @@ def delete_lambda_function(arn, region):
 
 ########################### S3 Service ##############################
 
-def delete_s3_bucket(arn, region):
+def delete_s3_bucket(arn: str, region: str) -> None:
     '''
     Checks to see if bucket has objects. If it does, the user will be prompted if they really
     want to delete the bucket and all of its objects. Works with versioned as well as unversioned buckets.
@@ -1200,7 +1231,7 @@ def delete_s3_bucket(arn, region):
 
 ########################## SNS Service ##############################
 
-def delete_sns_topic(arn, region):
+def delete_sns_topic(arn: str, region: str) -> None:
     client = boto3.client('sns', region_name=region)
     topic_arn = arn
     tf.header_print(f"Deleting SNS topic {topic_arn} in {region}...")
@@ -1228,7 +1259,7 @@ def delete_sns_topic(arn, region):
 
 ########################## SQS Service ##############################
 
-def delete_sqs_queue(arn, region):
+def delete_sqs_queue(arn: str, region: str) -> None:
     client = boto3.client('sqs', region_name=region)
     queue_name = arn.split(':')[-1]
     tf.header_print(f"Deleting SQS queue {queue_name} in {region}...")
