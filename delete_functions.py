@@ -1169,10 +1169,11 @@ def delete_elastic_load_balancer(arn: str, region: str) -> None:
         return
 
     # Confirm deletion of listeners and target groups
-    tf.indent_print(f"Proceeding with deleting ELB {arn} will also delete the following listeners and target groups:\n")
+    tf.subheader_print(f"Proceeding with deleting ELB {arn} will also delete the following listeners and target groups:")
     tf.subheader_print("Listeners:", 6)
     for listener in listener_arns:
         tf.indent_print(listener, 8)
+    print()
     tf.subheader_print("Target groups:", 6)
     for tg in target_group_arns:
         tf.indent_print(tg, 8)

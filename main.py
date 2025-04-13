@@ -49,7 +49,7 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
         try:
             response = client.search_resources(
                 ResourceQuery=query,
-                MaxResults=100,
+                MaxResults=50,
             )
             while True:
                 for res in response.get('ResourceIdentifiers', []):
@@ -63,7 +63,7 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
                 # Retrieve additional results if NextToken is present
                 response = client.search_resources(
                     ResourceQuery=query,
-                    MaxResults=100,
+                    MaxResults=50,
                     NextToken=next_token
                 )
 
@@ -71,30 +71,7 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
             print(f"Error querying resources in region {region}: {e}")
             continue
 
-        # This should be placed in its own function and called with get_other_resources
-        # Autoscaling Groups - handled separately
-        asgclient = boto3.client('autoscaling', region_name=region)
-        try:
-            autoscaling_groups = asgclient.describe_auto_scaling_groups(
-                Filters=[{
-                    'Name': f'tag:{tag_key}',
-                    'Values': [tag_value]
-                }]
-            ).get("AutoScalingGroups", [])
-
-            for asg in autoscaling_groups:
-                resources.append({
-                    "ResourceArn": asg["AutoScalingGroupARN"],
-                    "ResourceType": "AWS::AutoScaling::AutoScalingGroup",
-                    "Region": region
-                })
-        except botocore.exceptions.ClientError as e:
-            print(f"Error querying ASGs in region {region}: {e}")
-
-        # Sleep to avoid hitting API rate limits
         time.sleep(0.2)
-
-    # print(f"DEBUG: - Modified response:{json.dumps(resources, indent=4, default=str)}")
 
     return resources
 
@@ -105,7 +82,7 @@ def get_other_resources(tag_key: str, tag_value: str, regions: list[str]) -> lis
 
     Calls various other functions that can obtain resource information by tag key and
     value, even if they are not present when using the 'resource-groups' client. Presently
-    it only calls the get_images function, which retrieves images and snapshots by tag.
+    it calls get_images (which retrieves images and snapshots) and get_autoscaling_groups.
     Other resources may be added in the future as needed.
 
     Args:
@@ -117,8 +94,8 @@ def get_other_resources(tag_key: str, tag_value: str, regions: list[str]) -> lis
         list[dict[str, str]] - List of dictionaries containing resource information.
             \nEach dictionary contains the following keys:
             - resource_type (str): Type of the resource.
-            - resource_id (str): ID of the resource. Present if arn is not.
-            - arn (str): ARN of the resource. Present if resource_id is not.
+            - resource_id (optional(str)): ID of the resource. Present if arn is not.
+            - arn (optional(str)): ARN of the resource. Present if resource_id is not.
             - service (str): Service that the resource belongs to.
             - region (str): Region where the resource is located.
     """
@@ -126,6 +103,9 @@ def get_other_resources(tag_key: str, tag_value: str, regions: list[str]) -> lis
     resources = []
     images_and_snapshots = get_other_ids.get_images(tag_key, tag_value, regions)
     resources.extend(images_and_snapshots)
+
+    autoscaling_groups = get_other_ids.get_autoscaling_groups(tag_key, tag_value, regions)
+    resources.extend(autoscaling_groups)
 
     return resources
 
