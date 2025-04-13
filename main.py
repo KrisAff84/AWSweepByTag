@@ -114,7 +114,23 @@ def parse_resource_by_type(resource: dict[str, str]) -> dict[str, str]:
     """
     Parse resource by type, ARN, service, and region to return a standardized dictionary
 
-    Parsing is needed so that each resource can be mapped to the appropriate deletion function
+    Parsing is needed so that each resource can be mapped to the appropriate deletion function.
+    Before processing, each resource takes on the following format:
+
+        {
+            'ResourceArn': 'arn:aws:...',
+            'ResourceType': 'AWS::Service::ResourceType',
+            'Region': 'us-west-2'
+        }
+
+    After processing, the format will change to the following:
+
+        {
+            'resource_type': 'resourcetype',
+            'arn': 'arn:aws:...', # This field could be 'arn' or 'resource_id' depending on the service
+            'service': 'service',
+            'region': 'us-west-2'
+        }
 
     Args:
         resource (dict[str, str]): Dictionary containing resource information.
