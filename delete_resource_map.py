@@ -7,7 +7,8 @@ DELETE_FUNCTIONS = {
         'restapi': df.delete_rest_api # For REST APIs
     },
     'apigatewayv2': {
-        'api': df.delete_api # For HTTP and websocket APIs
+        'api': df.delete_api, # For HTTP and websocket APIs
+        "vpclink": df.delete_vpc_link
     },
     'autoscaling': {
         'autoscalinggroup': df.delete_autoscaling_group

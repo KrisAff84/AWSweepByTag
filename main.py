@@ -215,13 +215,17 @@ def delete_resource(resource):
     if resource_type == "distribution":
         retry = disable_cloudfront_distribution(arn)
         if retry:
-            return resource
+            return [resource]
         else:
-            return
+            return None
 
     if service in drmap.DELETE_FUNCTIONS and resource_type in drmap.DELETE_FUNCTIONS[service]:
         try:
-            drmap.DELETE_FUNCTIONS[service][resource_type](arn, region)
+            resources = drmap.DELETE_FUNCTIONS[service][resource_type](arn, region) # Make sure a list[dict] is returned from delete functions
+            if resources:
+                return resources
+            else:
+                return None
 
         except botocore.exceptions.ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
@@ -234,13 +238,13 @@ def delete_resource(resource):
             # These exceptions will be handled by the retry function
             if error_code in ["DependencyViolation", "TooManyRequestsException", "ThrottlingException", "ServiceUnavailableException"]:
                 tf.failure_print(f"Resource '{arn}' could not be deleted due to a {error_code}. Retrying later...")
-                return resource  # Return to main function for retry
+                return [resource]  # Return to main function for retry
 
             # Unknown exceptions to be handled by retry function for good measure
             tf.failure_print(f"Resource '{arn}' could not be deleted. Error:")
             tf.indent_print(e, 6)
             tf.indent_print("Retrying later...")
-            return resource
+            return [resource]
 
     else:
         tf.header_print(f"No delete function found for {service}::{resource_type}. Resource must be deleted manually\n")
@@ -341,9 +345,13 @@ def main():
                 print(f"Skipping deletion of {resource_name}")
                 continue
 
-        failed_deletion = delete_resource(resource)
-        if failed_deletion:
-            failed_deletions.append(failed_deletion)
+        result = delete_resource(resource)
+
+        if result:
+            if isinstance(result, list):
+                failed_deletions.extend(result)
+            else:
+                failed_deletions.append(result)
 
     if failed_deletions:
         retry_failed_deletions(failed_deletions)

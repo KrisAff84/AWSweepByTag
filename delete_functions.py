@@ -63,7 +63,7 @@ import text_formatting as tf
 ######################### API GW Services ###########################
 
 # This has been tested and works. The same logic needs to be updated for the REST API function.
-def delete_api(arn: str, region: str) -> None:
+def delete_api(arn: str, region: str) -> list[dict] | None:
     """
     Delete HTTP or websocket API from API GW in a given region.
 
@@ -98,84 +98,46 @@ def delete_api(arn: str, region: str) -> None:
     try:
         response = client.delete_api(ApiId=api_id)
         status_code = response['ResponseMetadata']['HTTPStatusCode']
+
         if 200 <= status_code < 300:
-            tf.success_print(f"API {arn} was successfully deleted")
+            tf.success_print(f"API '{arn}' was successfully deleted")
         else:
-            tf.failure_print(f"API {arn} was not successfully deleted")
+            tf.failure_print(f"API '{arn}' was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
-    except botocore.exceptions.ClientError as e:
-        tf.failure_print(f"Failed to delete API {arn}: {e}\n")
+
+    except botocore.exceptions.ClientError:
         raise
 
     print()
     # Ask if user wants to delete associated VPC links if there are any
     delete_vpc_links = 'n'
     if vpc_link_ids:
+        vpc_links_for_retry = []
+        vpc_links_successful_delete = []
         delete_vpc_links = tf.prompt(f'Found {len(vpc_link_ids)} VPC link(s) associated with API {arn}. Delete them?')
         print()
         if delete_vpc_links != 'y':
             tf.indent_print("VPC links will not be deleted")
             return
+
         else:
             for vpc_link_id in vpc_link_ids:
-                try:
-                    response = client.delete_vpc_link(VpcLinkId=vpc_link_id)
-                    status_code = response['ResponseMetadata']['HTTPStatusCode']
-                    if 200 <= status_code < 300:
-                        tf.success_print(f"VPC link {vpc_link_id} was successfully deleted")
-                    else:
-                        tf.failure_print(f"VPC link {vpc_link_id} was not successfully deleted")
-                    tf.response_print(json.dumps(response, indent=4, default=str))
-                except botocore.exceptions.ClientError as e:
-                    tf.failure_print(f"Error deleting VPC link {vpc_link_id}: {e}\n")
+                vpc_link = delete_vpc_link(vpc_link_id, region, True)
+                if vpc_link:
+                    vpc_links_for_retry.append(vpc_link)
+                else:
+                    vpc_links_successful_delete.append(vpc_link_id)
+
+            if vpc_links_successful_delete:
+                vpc_link_waiter(vpc_links_successful_delete, region)
+
+            if vpc_links_for_retry:
+                return vpc_links_for_retry
 
     # Exit if no VPC links were found
     else:
         return
 
-    # Wait for VPC links to become inactive (avoid dependency issues)
-    if vpc_link_ids and delete_vpc_links == 'y':
-        tf.indent_print("Checking status(es) of VPC link(s) to avoid dependency violations...\n")
-        max_retries = 5
-        retry_delay = 5
-        retry = 0
-
-        while retry <= max_retries:
-            vpc_link_statuses = []
-            all_inactive = True
-
-            for vpc_link_id in vpc_link_ids:
-                try:
-                    response = client.get_vpc_link(VpcLinkId=vpc_link_id)
-                    if 'VpcLink' in response:
-                        status = response['VpcLink']['VpcLinkStatus']
-                    else:
-                        status = response.get('VpcLinkStatus') or response.get('status')  # fallback
-                    vpc_link_statuses.append((vpc_link_id, status))
-                    if status in ('DELETING', 'PENDING', 'AVAILABLE'):
-                        all_inactive = False
-                except botocore.exceptions.ClientError as e:
-                    if e.response['Error']['Code'] == 'NotFoundException':
-                        tf.success_print(f"VPC link {vpc_link_id} is already deleted")
-                    else:
-                        tf.indent_print(f"Error checking status for VPC link {vpc_link_id}: {e}")
-                        all_inactive = False
-
-            print()
-            if all_inactive:
-                tf.success_print("All VPC links are inactive or deleted")
-                break
-            else:
-                tf.indent_print("Some VPC links are still active:")
-                for vpc_link_id, status in vpc_link_statuses:
-                    tf.indent_print(f"  - {vpc_link_id}: {status}")
-                tf.indent_print(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry += 1
-
-        if retry > max_retries:
-            tf.failure_print("Some VPC links may still be active. Please check manually")
-    print()
 
 # TODO: This still needs to be tested with the VPC link logic, although the REST API has been confirmed to delete successfully
 def delete_rest_api(arn: str, region: str) -> None:
@@ -283,6 +245,106 @@ def delete_rest_api(arn: str, region: str) -> None:
 
     print()
 
+
+def delete_vpc_link(vpc_link_id: str, region: str, apigw_function: bool=False) -> dict | None:
+    """
+    Delete VPC Link in a given region by VPC Link ID.
+
+    Can be called from either delete_api, delete_rest_api, or from the retry logic
+
+    Args:
+        vpc_link_id (str): The ID of the VPC Link to delete
+        region (str): The region in which the VPC Link is located
+        apigw_function (bool, optional): Whether the function was called by an API delete function. Defaults to False.
+    """
+
+    client = boto3.client('apigatewayv2', region_name=region)
+
+    if not apigw_function:
+        tf.header_print(f"Deleting VPC link {vpc_link_id} in {region}...")
+
+    else:
+        tf.subheader_print(f"Deleting VPC link {vpc_link_id} in {region}...")
+
+    resource = {
+        "resource_type": "vpclink",
+        "arn": vpc_link_id,
+        "service": "apigatewayv2",
+        "region": region
+    }
+
+    # TODO: Implement logic to call vpc_link_waiter if called from retry logic
+    # If called from API delete functions, waiter is called within those functions
+    try:
+        response = client.delete_vpc_link(VpcLinkId=vpc_link_id)
+        status_code = response['ResponseMetadata']['HTTPStatusCode']
+
+        if 200 <= status_code < 300:
+            tf.success_print(f"VPC link {vpc_link_id} was successfully deleted")
+            tf.response_print(json.dumps(response, indent=4, default=str))
+            if not apigw_function:
+                vpc_link_waiter([vpc_link_id], region)
+                return
+        else:
+            tf.failure_print(f"VPC link {vpc_link_id} was not successfully deleted. Retrying later...")
+            tf.response_print(json.dumps(response, indent=4, default=str))
+            return resource
+
+    except botocore.exceptions.ClientError:
+        return resource
+
+
+def vpc_link_waiter(vpc_link_ids: list, region: str) -> None:
+    """
+    Waits for VPC Links to become inactive or non-existent to avoid dependency issues
+    """
+
+    tf.indent_print("Checking status(es) of VPC link(s) to avoid dependency violations...\n")
+
+    client = boto3.client('apigatewayv2', region_name=region)
+    max_retries = 5
+    retry_delay = 5
+    retry = 0
+
+    while retry <= max_retries:
+        vpc_link_statuses = []
+        all_inactive = True
+
+        for vpc_link_id in vpc_link_ids:
+            try:
+                response = client.get_vpc_link(VpcLinkId=vpc_link_id)
+
+                if 'VpcLink' in response:
+                    status = response['VpcLink']['VpcLinkStatus']
+                else:
+                    status = response.get('VpcLinkStatus') or response.get('status')  # fallback
+                vpc_link_statuses.append((vpc_link_id, status))
+                if status in ('DELETING', 'PENDING', 'AVAILABLE'):
+                    all_inactive = False
+
+            except botocore.exceptions.ClientError as e:
+                if e.response['Error']['Code'] == 'NotFoundException':
+                    tf.success_print(f"VPC link {vpc_link_id} is already deleted")
+                else:
+                    tf.indent_print(f"Error checking status for VPC link {vpc_link_id}: {e}")
+                    all_inactive = False
+
+        print()
+        if all_inactive:
+            tf.success_print("All VPC links are inactive or deleted")
+            break
+        else:
+            tf.indent_print("Some VPC links are still active:")
+            for vpc_link_id, status in vpc_link_statuses:
+                tf.indent_print(f"  - {vpc_link_id}: {status}")
+            tf.indent_print(f"Retrying in {retry_delay} seconds...")
+            time.sleep(retry_delay)
+            retry += 1
+
+    if retry > max_retries:
+        tf.failure_print("Some VPC links may still be active. Please check manually")
+    print()
+
 ################# Application Autoscaling Service ###################
 
 def delete_application_autoscaling(service_namespace: str, resource_id: str, region: str) -> None:
@@ -326,6 +388,7 @@ def delete_application_autoscaling(service_namespace: str, resource_id: str, reg
             policy_dimension_map[dimension] = policy_names
 
     # Delete policies
+    # TODO: Consider putting this into its own function and returning a resource for retry in event of failure
     tf.subheader_print(f"Deleting Application Autoscaling Policies and Targets for {resource_id}...")
     for dimension, policy_names in policy_dimension_map.items():
         for policy_name in policy_names:
@@ -352,11 +415,15 @@ def delete_application_autoscaling(service_namespace: str, resource_id: str, reg
 
 ####################### AutoScaling Service #########################
 
-def delete_autoscaling_group(arn: str, region: str) -> None:
+def delete_autoscaling_group(arn: str, region: str) -> list[dict] | None:
     """
     Delete an autoscaling group and terminate all instances in the group
 
-    After each instance is terminated, it calls ec2_waiter to ensure they are fully terminated.
+    1. Autoscaling group is checked for any instances
+    2. Autoscaling group is deleted, function returns if not instances exist, any exceptions are raised
+    3. If instances exist, they are terminated with delete_ec2_instance and ec2_waiter is called to wait for full termination
+    4. If instances fail to delete, they are added to a list of instances to retry and returned
+
     The step to delete instances seems redundant, but this is done to speed up the process, as
     there is often a lag between deleting an autoscaling group and when instances are actually
     terminated.
@@ -364,32 +431,73 @@ def delete_autoscaling_group(arn: str, region: str) -> None:
     Args:
         arn (str): The ARN of the autoscaling group to delete
         region (str): The region the autoscaling group is in
+
+    Returns:
+        list[dict] | None - List of instances (as dicts) that failed to delete, or None if no instances exist or all were successfully terminated.
     """
 
     tf.header_print(f"Deleting autoscaling group {arn} in {region}...")
     client = boto3.client('autoscaling', region_name=region)
     asg_name = arn.split('/')[-1]
-    instances = [
+    account_id = arn.split(':')[4]
+
+    instance_ids = [
         instance["InstanceId"]
         for instance in client.describe_auto_scaling_groups(AutoScalingGroupNames=[asg_name])["AutoScalingGroups"][0]["Instances"]
     ]
 
-    response = client.delete_auto_scaling_group(AutoScalingGroupName=asg_name, ForceDelete=True)
-    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.success_print(f"Autoscaling group {arn} deletion initiated successfully")
-    else:
-        tf.failure_print(f"Autoscaling group {arn} was not successfully deleted")
-    tf.response_print(json.dumps(response, indent=4, default=str))
+    instance_arns = [
+        f"arn:aws:ec2:{region}:{account_id}:instance/{instance_id}"
+        for instance_id in instance_ids
+    ]
+    try:
+        response = client.delete_auto_scaling_group(AutoScalingGroupName=asg_name, ForceDelete=True)
+        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+            tf.success_print(f"Autoscaling group {arn} deletion initiated successfully")
+        else:
+            tf.failure_print(f"Autoscaling group {arn} was not successfully deleted")
+        tf.response_print(json.dumps(response, indent=4, default=str))
 
-    # Check to make sure autoscaling instances are fully shut down
-    if instances:
-        for instance in instances:
+    except botocore.exceptions.ClientError:
+        raise
+
+    if not instance_arns:
+        return
+
+    # Terminate any instances if they exist and wait until they are fully terminated
+    instances_to_retry = []
+
+    for instance in instance_arns:
+        try:
             delete_ec2_instance(instance, region, True)
-        tf.indent_print("Waiting for autoscaling instances to shut down to avoid dependency violations...")
 
-        ec2_waiter(instances, region)
-        tf.success_print("All instances in autoscaling group are terminated.")
-        print()
+        except Exception as e:
+            tf.failure_print(f"Error deleting instances in autoscaling group '{asg_name}':")
+            tf.indent_print(e, 6)
+            instance_map = {
+                "arn": instance,
+                "service": "ec2",
+                "resource_type": "instance",
+                "region": region
+            }
+            instances_to_retry.append(instance_map)
+
+    if not instances_to_retry:
+        instance_ids_to_confirm = instance_ids
+
+    else:
+        instance_ids_to_confirm = [
+            arn.split('/')[-1]
+            for arn in instance_arns
+            if arn not in [instance['arn'] for instance in instances_to_retry]
+        ]
+
+    tf.indent_print("Waiting for autoscaling instances to shut down to avoid dependency violations...")
+    ec2_waiter(instance_ids_to_confirm, region)
+    tf.success_print("All instances in autoscaling group are terminated.")
+    print()
+
+    return instances_to_retry
 
 ####################### CloudFront Service ##########################
 
@@ -633,12 +741,13 @@ def delete_ec2_instance(arn: str, region: str, autoscaling: bool=False) -> None:
     """
     Terminate an EC2 instance in a given region by a given ARN
 
-    Can be called by the main delete function or by delete_autoscaling_group. A describe_instance
-    request is first made to check if the instance exists and has not already been terminated.
-    If it hasn't, the termination request is made. If the instance was not terminated as part of
-    an autoscaling group deletion, the ec2_waiter function is called to ensure the instance is
-    fully terminated to avoid any dependency issues. If the instance was terminated as part of an
-    autoscaling group deletion, the ec2_waiter function is called by the delete_autoscaling_group
+    Can be called by the main delete function or by delete_autoscaling_group.
+
+    1. A describe_instance request is first made to check if the instance exists and has not already been terminated.
+    2. If it hasn't, the termination request is made.
+    3. If the instance was not terminated as part of an autoscaling group deletion, the ec2_waiter function is called to ensure the instance is
+    fully terminated to avoid any dependency issues.
+    4. If the instance was terminated as part of an autoscaling group deletion, the ec2_waiter function is called by the delete_autoscaling_group
     function instead.
 
     Args:
@@ -651,43 +760,59 @@ def delete_ec2_instance(arn: str, region: str, autoscaling: bool=False) -> None:
     instance_id = arn.split('/')[-1]
 
     if autoscaling:
-        tf.indent_print(f"Terminating EC2 instance {instance_id} in {region}...")
+        tf.subheader_print(f"Terminating EC2 instance '{instance_id}' in {region}...")
     else:
-        tf.header_print(f"Terminating EC2 instance {instance_id} in {region}...")
+        tf.header_print(f"Terminating EC2 instance '{instance_id}' in {region}...")
 
     try:
         response = client.describe_instances(InstanceIds=[instance_id])
+
     except botocore.exceptions.ClientError as e:
         error_code = e.response.get('Error', {}).get('Code', '')
+
         if error_code == 'InvalidInstanceID.NotFound':
-            tf.success_print(f"EC2 instance {instance_id} not found. It may have already been terminated.\n")
+            tf.success_print(f"EC2 instance '{instance_id}' not found. It may have already been terminated.\n")
             return
+
         else:
-            tf.failure_print(f"Error describing EC2 instance {instance_id}: {e}")
+            tf.failure_print(f"Error describing EC2 instance '{instance_id}': {e}\n")
             raise
-            print()
 
     if not response['Reservations']:
-        tf.success_print(f"EC2 instance {instance_id} not found. It may have already been terminated.\n")
+        tf.success_print(f"EC2 instance '{instance_id}' not found. It may have already been terminated.\n")
         return
 
     instance_status = response['Reservations'][0]['Instances'][0]['State']['Name']
 
     if instance_status in ['terminated', 'shutting-down']:
-        tf.success_print(f"Current status of EC2 instance {instance_id} is: {instance_status}. Skipping...\n")
+        tf.success_print(f"Current status of EC2 instance '{instance_id}' is: {instance_status}. Skipping...\n")
         return
 
-    response = client.terminate_instances(InstanceIds=[instance_id])
-    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.success_print(f"EC2 instance {instance_id} is shutting down.")
-    else:
-        tf.failure_print(f"EC2 instance {instance_id} termination was not successfully initiated.")
-    tf.response_print(json.dumps(response, indent=4, default=str))
+    try:
+        response = client.terminate_instances(InstanceIds=[instance_id])
+        status_code = response['ResponseMetadata']['HTTPStatusCode']
 
-    if not autoscaling:
-        ec2_waiter([instance_id], region)
-        tf.success_print(f"EC2 instance {instance_id} has been terminated.")
-        print()
+        if 200 <= status_code < 300:
+            tf.success_print(f"EC2 instance '{instance_id}' is shutting down.")
+        else:
+            raise RuntimeError(f"Failed to initiate termination of EC2 instance '{instance_id}': Status Code: {status_code}")
+
+        tf.response_print(json.dumps(response, indent=4, default=str))
+
+        if not autoscaling:
+            ec2_waiter([instance_id], region)
+            tf.success_print(f"EC2 instance {instance_id} has been terminated.")
+            print()
+
+    except botocore.exceptions.ClientError as e:
+        tf.failure_print(f"ClientError while terminating EC2 instance '{instance_id}':")
+        tf.indent_print(e, 6)
+        raise
+
+    except Exception as e:
+        tf.failure_print(f"Unexpected error while terminating EC2 instance '{instance_id}':")
+        tf.indent_print(e, 6)
+        raise
 
 
 def ec2_waiter(instance_ids: list[str], region: str) -> None:
@@ -1016,7 +1141,7 @@ def delete_elastic_load_balancer(arn: str, region: str) -> None:
     tf.header_print(f"Deleting ELB {arn} in {region}...")
     client = boto3.client('elbv2', region_name=region)
 
-    tf.indent_print("Checking ELB for listeners and target groups...")
+    tf.indent_print("Checking ELB for listeners and target groups...\n")
     response = client.describe_listeners(LoadBalancerArn=arn)
     listeners = response['Listeners']
     listener_arns = [listener['ListenerArn'] for listener in listeners]
@@ -1039,20 +1164,21 @@ def delete_elastic_load_balancer(arn: str, region: str) -> None:
     if tgs_attached_to_other_elbs:
         tf.indent_print("The following target groups are used by other ELBs and will not be deleted:\n")
         for tg in tgs_attached_to_other_elbs:
-            tf.indent_print(tg, indent=6)
+            tf.indent_print(tg, 6)
         tf.indent_print(f"ELB {arn} cannot be deleted at this time. Exiting...\n")
         return
 
     # Confirm deletion of listeners and target groups
     tf.indent_print(f"Proceeding with deleting ELB {arn} will also delete the following listeners and target groups:\n")
-    tf.indent_print("Listeners:", indent=6)
+    tf.subheader_print("Listeners:", 6)
     for listener in listener_arns:
-        tf.indent_print(listener, indent=8)
-    tf.indent_print("Target groups:", indent=6)
+        tf.indent_print(listener, 8)
+    tf.subheader_print("Target groups:", 6)
     for tg in target_group_arns:
-        tf.indent_print(tg, indent=8)
+        tf.indent_print(tg, 8)
     print()
     delete_tgs_and_listeners = tf.prompt("Proceed with deletion process?")
+    print()
 
     if delete_tgs_and_listeners != 'y':
         tf.indent_print("Skipping ELB deletion...")
