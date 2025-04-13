@@ -47,8 +47,10 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
         }
 
         try:
-            response = client.search_resources(ResourceQuery=query)
-            # print(f"DEBUG - Original response:{json.dumps(response, indent=4, default=str)}")
+            response = client.search_resources(
+                ResourceQuery=query,
+                MaxResults=100,
+            )
             while True:
                 for res in response.get('ResourceIdentifiers', []):
                     res['Region'] = region
@@ -58,7 +60,13 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
                 if not next_token:
                     break
 
-                response = client.search_resources(ResourceQuery=query, NextToken=next_token)
+                # Retrieve additional results if NextToken is present
+                response = client.search_resources(
+                    ResourceQuery=query,
+                    MaxResults=100,
+                    NextToken=next_token
+                )
+
         except botocore.exceptions.ClientError as e:
             print(f"Error querying resources in region {region}: {e}")
             continue
@@ -82,6 +90,9 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
                 })
         except botocore.exceptions.ClientError as e:
             print(f"Error querying ASGs in region {region}: {e}")
+
+        # Sleep to avoid hitting API rate limits
+        time.sleep(0.2)
 
     # print(f"DEBUG: - Modified response:{json.dumps(resources, indent=4, default=str)}")
 
