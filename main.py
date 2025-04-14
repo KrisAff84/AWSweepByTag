@@ -161,54 +161,131 @@ def parse_resource_by_type(resource: dict[str, str]) -> dict[str, str]:
     return resource_for_deletion
 
 
-def order_resources_for_deletion(resources):
+def order_resources_for_deletion(resources: list[dict[str, str]]) -> list[dict[str, str]]:
+    """
+    Orders resources for deletion based on their potential dependencies
 
-    # Remove application autoscaling resource from the list
+    1. Application autoscaling resources are removed - their deletion is handled when the resource they are scaling is deleted.
+    2. Resources are then grouped into 4 lists based on their deletion order:
+
+        1. Networking resources - must be ordered internally + they need to be placed last since other resources depend on them
+        2. Other resources that must follow a deletion order - currently this includes ELBs (and associated resources) and ASGs
+        3. Resources that do not contain an arn (e.g., snapshots, AMIs) - Can be deleted at any time
+        4. Other resources - Can be deleted at any time
+
+    3. Resources are ordered based based on order of deletion and returned
+
+    Args:
+        resources (list[dict[str, str]]): List of resources to be deleted.
+
+    Returns:
+        list[dict[str, str]] - Ordered list of resources to be deleted.
+    """
+
+    # Remove application autoscaling resource from the list - any application autoscaling resource is deleted when the resource it is scaling is deleted
     resources = [r for r in resources if r.get("service") != "applicationautoscaling"]
 
-    # Networking resources that must follow a particular deletion order
+    ############ Group the resources into larger groups of similar category ##############
+
+    # Networking resources that must follow a particular deletion order - These need to be deleted last since other resources depend on them
+    # Additionally, resources in this group need to follow a strict internal deletion order as well
+    # EC2 instance is the exception in this group since it is not a networking resource, but is shares the same service type ("ec2")
     ordered_networking_resources = [
-        resource for resource in resources
-        if ("ec2" in resource["service"]) and (
-            resource['resource_type'] in (
-                'vpcendpoint',
-                'natgateway',
-                'subnet',
+        r for r in resources
+        if r["service"] == "ec2" and (
+            r['resource_type'] in (
                 'eip',
+                "instance",
                 'internetgateway',
+                'natgateway',
                 'routetable',
-                'vpc',
+                'subnet',
                 'transitgatewayattachment',
-                "instance"
+                'vpcendpoint',
+                'vpc',
             )
         )
     ]
-    # Other resources that must follow a particlar deletion order
-    ordered_non_networking_resources = [resource for resource in resources if "ec2" not in resource["service"]]
-    non_ordered_resources = [resource for resource in ordered_non_networking_resources if resource["service"] not in ["elasticloadbalancingv2", "autoscaling"]]
-    other_resources = [resource for resource in resources if resource.get("resource_id")]
+
+    # Other resources that must follow a particlar deletion order but are not networking resources
+    ordered_non_networking_resources = [
+        r for r in resources
+        if (r["service"] in (
+            "elasticloadbalancingv2",
+            "autoscaling",
+            )
+        )
+    ]
+
+    # Resources that have a `resource_id` instead of an ARN (e.g., snapshots, AMIs)
+    # May rename to snapshots_and_images in the future if these end up being the only resources with resource_id
+    other_resources = [
+        r for r in resources
+        if "resource_id" in r
+        and r not in ordered_networking_resources
+        and r not in ordered_non_networking_resources
+    ]
+
+    # Remaining resources that are not part of the above groups - these (along with other_resources) can be deleted first since no other resource depends on them
+    non_ordered_resources = [
+        r for r in resources
+        if r not in ordered_networking_resources
+        and r not in ordered_non_networking_resources
+        and r not in other_resources
+    ]
 
     ordered_resources = []
-    ordered_resources.extend([resource for resource in non_ordered_resources])
-    ordered_resources.extend([resource for resource in other_resources])
-    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "autoscaling" in resource["service"]])
-    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "loadbalancer" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "listener" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in ordered_non_networking_resources if "targetgroup" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in ordered_networking_resources if "instance" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in ordered_networking_resources if "vpcendpoint" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in ordered_networking_resources if "natgateway" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in ordered_networking_resources if "subnet" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in ordered_networking_resources if "eip" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in ordered_networking_resources if "internetgateway" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in ordered_networking_resources if "routetable" in resource["resource_type"]])
-    ordered_resources.extend([resource for resource in ordered_networking_resources if resource["resource_type"] == "vpc"])
+    ordered_resources.extend(non_ordered_resources)
+    ordered_resources.extend(other_resources)
+    ordered_resources.extend([r for r in ordered_non_networking_resources if r["service"] == "autoscaling"])
+    ordered_resources.extend([r for r in ordered_non_networking_resources if "loadbalancer" in r["resource_type"]])
+    ordered_resources.extend([r for r in ordered_non_networking_resources if "listener" in r["resource_type"]])
+    ordered_resources.extend([r for r in ordered_non_networking_resources if "targetgroup" in r["resource_type"]])
+    ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "instance"])
+    ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "vpcendpoint"])
+    ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "natgateway"])
+    ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "subnet"])
+    ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "eip"])
+    ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "internetgateway"])
+    ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "routetable"])
+    ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "vpc"])
 
     return ordered_resources
 
 
-def delete_resource(resource):
-    """Finds and calls the appropriate delete function based on the resource type."""
+def delete_resource(resource: dict[str, str]) -> list[dict[str, str]] | None:
+    """
+    Finds and calls the appropriate delete function based on the resource type
+
+    This function performs the following steps:
+
+    1. The resource is checked to see if it is a CloudFront distribution.
+    2. If the resource is a CloudFront distribution, disable_cloudfront_distribution is called -> resource is returned for attempted deletion with the retry function.
+    3. If the resource is not a CloudFront distribution, the DELETE_FUNCTIONS dictionary is checked to see if a delete function exists for the resource
+    4. If a delete function exists, it is called -> ancillary resources can be returned if they were not successfully deleted.
+    5. If a delete function does not exist, a message is printed and the resource is skipped.
+
+        - Example: If an API GW is the main resource to delete, any VPC links will be attempted to be deleted as well.
+        If they are not successfully deleted they will be returned by the resource delete function to be retried by the retry function.
+        Unsuccessful "main" resources (API GW in the above example) will raise an exception in their delete function, and be returned by this function.
+
+    Args:
+        resource (dict[str, str]): Dictionary containing resource information.
+
+    Returns:
+        list[dict[str, str]] | None: List of resources that were not successfully deleted, or None if all resources were successfully deleted.
+
+    Raises:
+        None
+
+        - Exceptions are handled by returning resources to be retried by the retry function, unless the exception is one of the following,
+        in which case a message is printed and None is returned:
+
+            - NotFoundException
+            - NoSuchEntity
+            - ResourceNotFoundException
+    """
+
     service = resource['service']
     resource_type = resource['resource_type']
     arn = resource.get('arn') or resource.get('resource_id')
@@ -258,8 +335,29 @@ def delete_resource(resource):
         return None
 
 # Need to print a statement when all resources have been deleted
-def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
-    """Retries failed deletions up to max_retries times with exponential backoff."""
+def retry_failed_deletions(failed_resources: list[dict[str, str]], max_retries: int=6, wait_time: int=10) -> None:
+    """
+    Retries failed deletions up to max_retries times
+
+    CloudFront distributions are handled differently than other resources.
+        - In the main delete function (delete_resources), the distribution is disabled, unless it has already been disabled in which case it is deleted.
+        - In this function, a waiter is called to wait for the distribution to be disabled.
+        - After the distribution is disabled, it is deleted.
+
+    Other Resources:
+        - The retry function is called for each resource that was not successfully deleted.
+        - If the resource is not successfully deleted the first time, it is retried up to max_retries times.
+        - If there are resources that have not successfully deleted after max_retries, they are printed to the console and the function completes.
+
+    Args:
+        failed_resources (list[dict[str, str]]): List of resources that were not successfully deleted.
+        max_retries (int, optional): Maximum number of retries. Defaults to 6.
+        wait_time (int, optional): Time (seconds) to wait between retries. Defaults to 10.
+
+    Returns:
+        None
+
+    """
 
     # Separate CloudFront distributions from other resources
     cloudfront_resources = [r for r in failed_resources if r.get("resource_type") == "distribution"]
@@ -271,7 +369,7 @@ def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
             wait_for_distribution_disabled(resource['arn'])
             delete_cloudfront_distribution(resource['arn'])
         except Exception as e:
-            print(f"Error deleting CloudFront distribution {resource['arn']} on retry: {str(e)}")
+            tf.failure_print(f"Error deleting CloudFront distribution {resource['arn']} on retry: {str(e)}")
             other_resources.append(resource)  # Add it back for retry if it still fails
 
     if other_resources == []:
@@ -279,7 +377,7 @@ def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
 
     # Retry loop for everything else
     for attempt in range(1, max_retries + 1):
-        print(f"\nRetry attempt {attempt}/{max_retries} for failed deletions...\n")
+        tf.header_print(f"Retry attempt {attempt}/{max_retries} for failed deletions...")
         new_failed_resources = []
 
         for resource in other_resources:
@@ -291,22 +389,26 @@ def retry_failed_deletions(failed_resources, max_retries=6, wait_time=5):
                 result = delete_resource(resource)
                 if result:
                     new_failed_resources.append(result)
+
             except botocore.exceptions.ClientError as e:
                 if "DependencyViolation" in str(e):
                     new_failed_resources.append(resource)
                 else:
-                    print(f"Fail from retry function: Failed to delete {resource['arn']}")
+                    tf.failure_print(f"Fail from retry function: Failed to delete {resource['arn']}", 0)
 
         if not new_failed_resources:
-            print("All resources were successfully deleted.")
+            tf.success_print("All resources were successfully deleted.", 0)
             return
 
         other_resources = new_failed_resources
-        print(f"{len(other_resources)} resources still cannot be deleted. Retrying in {wait_time} seconds...")
+        print(f"{len(other_resources)} resources still cannot be deleted. Retrying in {wait_time} seconds...\n")
         time.sleep(wait_time)
 
     if other_resources:
-        print(f"\nFinal retry attempt reached. {len(other_resources)} resources could not be deleted.\n")
+        tf.failure_print(f"\nFinal retry attempt reached. {len(other_resources)} resources could not be deleted.", 0)
+        print("Resources that could not be deleted:\n")
+        for resource in other_resources:
+            tf.response_print(json.dumps(resource, indent=4, default=str), 4)
 
 
 def main():
