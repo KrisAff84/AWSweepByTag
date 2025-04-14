@@ -72,7 +72,6 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
             continue
 
         time.sleep(0.2)
-
     return resources
 
 
@@ -101,8 +100,8 @@ def get_other_resources(tag_key: str, tag_value: str, regions: list[str]) -> lis
     """
 
     resources = []
-    images_and_snapshots = get_other_ids.get_images(tag_key, tag_value, regions)
-    resources.extend(images_and_snapshots)
+    # images_and_snapshots = get_other_ids.get_images(tag_key, tag_value, regions)
+    # resources.extend(images_and_snapshots)
 
     autoscaling_groups = get_other_ids.get_autoscaling_groups(tag_key, tag_value, regions)
     resources.extend(autoscaling_groups)
@@ -325,9 +324,12 @@ def delete_resource(resource: dict[str, str]) -> list[dict[str, str]] | None:
                 return [resource]  # Return to main function for retry
 
             # Unknown exceptions to be handled by retry function for good measure
-            tf.failure_print(f"Resource '{arn}' could not be deleted. Error:")
-            tf.indent_print(e, 6)
-            tf.indent_print("Retrying later...")
+            tf.failure_print(f"Resource '{arn}' could not be deleted. Error:\n")
+            error_message_lines = str(e).split(': ', 1)
+            tf.failure_print(error_message_lines[0])
+            tf.failure_print(error_message_lines[1])
+            print()
+            tf.indent_print("Retrying later...\n")
             return [resource]
 
     else:
@@ -388,11 +390,11 @@ def retry_failed_deletions(failed_resources: list[dict[str, str]], max_retries: 
             try:
                 result = delete_resource(resource)
                 if result:
-                    new_failed_resources.append(result)
+                    new_failed_resources.extend(result)
 
             except botocore.exceptions.ClientError as e:
                 if "DependencyViolation" in str(e):
-                    new_failed_resources.append(resource)
+                    new_failed_resources.extend(resource)
                 else:
                     tf.failure_print(f"Fail from retry function: Failed to delete {resource['arn']}", 0)
 

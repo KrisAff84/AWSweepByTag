@@ -724,12 +724,16 @@ def delete_dynamodb_table(arn: str, region: str) -> None:
 
 ########################### EC2 Service #############################
 
-def deregister_ami(ami_id: str, region: str) -> None:
+def deregister_ami(arn: str, region: str) -> None:
     """Deregister and AMI in a given region by ami_id."""
 
+    ami_id = arn.split('/')[-1]
+
     tf.header_print(f"Deregistering AMI {ami_id} in {region}...")
+
     client = boto3.client('ec2', region_name=region)
     response = client.deregister_image(ImageId=ami_id)
+
     if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
         tf.success_print(f"AMI {ami_id} was successfully deregistered")
     else:
@@ -800,8 +804,9 @@ def delete_ec2_instance(arn: str, region: str, autoscaling: bool=False) -> None:
         tf.response_print(json.dumps(response, indent=4, default=str))
 
         if not autoscaling:
+            tf.indent_print(f"Waiting for EC2 instance '{instance_id}' to terminate to avoid dependency violations...")
             ec2_waiter([instance_id], region)
-            tf.success_print(f"EC2 instance {instance_id} has been terminated.")
+            tf.success_print(f"EC2 instance '{instance_id}' has been terminated.")
             print()
 
     except botocore.exceptions.ClientError as e:
@@ -950,14 +955,28 @@ def delete_route_table(arn: str, region: str) -> None:
 def delete_snapshot(arn: str, region: str) -> None:
     """Delete a snapshot in a given region by ARN."""
 
-    tf.header_print(f"Deleting snapshot {arn} in {region}...")
+    snapshot_id = arn.split('/')[-1]
+
+    tf.header_print(f"Deleting snapshot {snapshot_id} in {region}...")
+
     client = boto3.client('ec2', region_name=region)
-    response = client.delete_snapshot(SnapshotId=arn)
-    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.success_print(f"Snapshot {arn} was successfully deleted")
-    else:
-        tf.failure_print(f"Snapshot {arn} was not successfully deleted")
-    tf.response_print(json.dumps(response, indent=4, default=str))
+    try:
+        response = client.delete_snapshot(SnapshotId=snapshot_id)
+        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+            tf.success_print(f"Snapshot {snapshot_id} was successfully deleted")
+        else:
+            tf.failure_print(f"Snapshot {snapshot_id} was not successfully deleted")
+        tf.response_print(json.dumps(response, indent=4, default=str))
+
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', '')
+
+        if error_code == 'InvalidSnapshot.NotFound':
+            tf.success_print(f"Snapshot '{snapshot_id}' not found. It may have already been deleted.\n")
+            return
+
+        else:
+            raise
 
 
 # TODO: Add a check for hanging ENIs
