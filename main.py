@@ -81,8 +81,7 @@ def get_other_resources(tag_key: str, tag_value: str, regions: list[str]) -> lis
 
     Calls various other functions that can obtain resource information by tag key and
     value, even if they are not present when using the 'resource-groups' client. Presently
-    it calls get_images (which retrieves images and snapshots) and get_autoscaling_groups.
-    Other resources may be added in the future as needed.
+    it calls get_autoscaling_groups. Other resources may be added in the future as needed.
 
     Args:
         tag_key (str): Tag key.
@@ -100,8 +99,6 @@ def get_other_resources(tag_key: str, tag_value: str, regions: list[str]) -> lis
     """
 
     resources = []
-    # images_and_snapshots = get_other_ids.get_images(tag_key, tag_value, regions)
-    # resources.extend(images_and_snapshots)
 
     autoscaling_groups = get_other_ids.get_autoscaling_groups(tag_key, tag_value, regions)
     resources.extend(autoscaling_groups)
@@ -466,6 +463,9 @@ def main():
 
     if failed_deletions:
         retry_failed_deletions(failed_deletions)
+
+    else:
+        tf.success_print("All resources were successfully deleted.", 0)
 
 
 if __name__ == '__main__':

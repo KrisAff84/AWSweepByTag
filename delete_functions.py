@@ -896,6 +896,38 @@ def delete_internet_gateway(arn: str, region: str) -> None:
         tf.failure_print(f"Failed to delete {gateway_id}: {str(e)}\n")
 
 
+def delete_launch_template(arn: str, region: str) -> None:
+    """
+    Delete a launch template in a given region by ARN
+
+    Args:
+        arn (str): The ARN of the launch template to delete
+        region (str): The region the launch template is in
+
+    Returns:
+        None
+
+    Raises:
+        botocore.exceptions.ClientError: Any client errors that occur during the process
+    """
+
+    client = boto3.client('ec2', region_name=region)
+    template_id = arn.split('/')[-1]
+
+    tf.header_print(f"Deleting Launch Template {template_id} in {region}...")
+
+    try:
+        response = client.delete_launch_template(LaunchTemplateId=template_id)
+        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+            tf.success_print(f"Launch template {template_id} was successfully deleted")
+        else:
+            tf.failure_print(f"Launch template {template_id} was not successfully deleted")
+        tf.response_print(json.dumps(response, indent=4, default=str))
+
+    except botocore.exceptions.ClientError:
+        raise
+
+
 def delete_nat_gateway(arn: str, region: str) -> None:
     """
     Delete a NAT gateway in a given region by ARN.
@@ -950,6 +982,39 @@ def delete_route_table(arn: str, region: str) -> None:
     else:
         tf.failure_print(f"Route table {route_table_id} was not successfully deleted")
     tf.response_print(json.dumps(response, indent=4, default=str))
+
+
+# May need to add a step to detach from VPC to avoid dependency issues
+def delete_security_group(arn: str, region: str) -> None:
+    """
+    Delete a security group in a given region by ARN
+
+    Args:
+        arn (str): The ARN of the security group to delete
+        region (str): The region the security group is in
+
+    Returns:
+        None
+
+    Raises:
+        botocore.exceptions.ClientError: Any client errors that occur during the process
+    """
+
+    client = boto3.client('ec2', region_name=region)
+    sg_id = arn.split('/')[-1]
+
+    tf.header_print(f"Deleting security group {sg_id} in {region}...")
+
+    try:
+        response = client.delete_security_group(GroupId=sg_id)
+        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+            tf.success_print(f"Security group {sg_id} was successfully deleted")
+        else:
+            tf.failure_print(f"Security group {sg_id} was not successfully deleted")
+        tf.response_print(json.dumps(response, indent=4, default=str))
+
+    except botocore.exceptions.ClientError:
+        raise
 
 
 def delete_snapshot(arn: str, region: str) -> None:
