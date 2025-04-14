@@ -71,8 +71,7 @@ def get_images(tag_key: str, tag_value: str, regions: list[str]) -> list[dict]:
 
         except botocore.exceptions.ClientError as e:
             tf.failure_print(f"Error querying AMIs in region {region}:")
-            tf.failure_print(e)
-
+            tf.indent_print(f"{e}")
     return resources
 
 
@@ -117,6 +116,6 @@ def get_autoscaling_groups(tag_key: str, tag_value: str, regions: list[str]) -> 
 
         except botocore.exceptions.ClientError as e:
             tf.failure_print(f"Error querying ASGs in region {region}:")
-            tf.failure_print(e)
+            tf.indent_print(f"{e}\n", 8)
 
     return resources

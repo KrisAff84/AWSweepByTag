@@ -68,7 +68,17 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
                 )
 
         except botocore.exceptions.ClientError as e:
-            print(f"Error querying resources in region {region}: {e}")
+            print()
+            error_message = e.response.get('Error', {}).get('Message', '')
+            tf.failure_print(f"Error querying resources in region '{region}':")
+            tf.indent_print(f"{e}\n", 8)
+
+            if "token included in the request is invalid" in error_message:
+                tf.indent_print("The provided token is invalid. You may need to enable region '{region}' in your AWS account.\n", 8)
+
+            else:
+                tf.indent_print("Error:")
+                tf.indent_print(f"{e}")
             continue
 
         time.sleep(0.2)
@@ -410,14 +420,81 @@ def retry_failed_deletions(failed_resources: list[dict[str, str]], max_retries: 
             tf.response_print(json.dumps(resource, indent=4, default=str), 4)
 
 
+VALID_REGIONS = [
+   "us-east-1",
+   "us-east-2",
+   "us-west-1",
+   "us-west-2",
+   "af-south-1",
+   "ap-east-1",
+   "ap-south-1",
+   "ap-south-2",
+   "ap-southeast-1",
+   "ap-southeast-2",
+   "ap-southeast-3",
+   "ap-southeast-4",
+   "ap-southeast-5",
+   "ap-southeast-7",
+   "ap-northeast-1",
+   "ap-northeast-2",
+   "ap-northeast-3",
+   "ca-central-1",
+   "ca-west-1",
+   "eu-central-1",
+   "eu-central-2",
+   "eu-west-1",
+   "eu-west-2",
+   "eu-west-3",
+   "eu-south-1",
+   "eu-south-2",
+   "eu-north-1",
+   "il-central-1",
+   "mx-central-1",
+   "me-central-1",
+   "me-south-1",
+   "sa-east-1",
+   "cn-north-1",
+   "cn-northwest-1",
+   "us-gov-east-1",
+   "us-gov-west-1",
+]
+
+
 def main():
     tag_key = input("Enter the tag key to search by: ")
     tag_value = input("Enter the tag value to search by: ")
     regions = [r.strip() for r in input("Which region(s) would you like to search? (separate multiple regions with commas): ").lower().split(',')]
 
-    resources = get_resources_by_tag(tag_key, tag_value, regions)
+    invalid_regions = []
+    for region in regions:
+        if region not in VALID_REGIONS:
+            invalid_regions.append(region)
 
-    tf.header_print("\nResources queued for deletion:\n")
+    if invalid_regions:
+        tf.failure_print("\nThe following regions are invalid:\n")
+        for region in invalid_regions:
+            tf.indent_print(region)
+        print()
+        tf.subheader_print("Valid regions are:")
+        for region in VALID_REGIONS:
+            tf.indent_print(region)
+        print("\nPlease try again with valid regions. Exiting...\n")
+        return
+    try:
+        resources = get_resources_by_tag(tag_key, tag_value, regions)
+
+    except (
+        botocore.exceptions.NoCredentialsError,
+        botocore.exceptions.PartialCredentialsError,
+        botocore.exceptions.CredentialRetrievalError,
+    ) as e:
+        print()
+        tf.failure_print("AWS credentials are missing or incomplete. Please check your setup and try again.")
+        tf.indent_print(f"{e}\n", 8)
+        tf.indent_print("Exiting...\n")
+        return
+
+
     resources_for_deletion = []
 
     for resource in resources:
@@ -427,7 +504,15 @@ def main():
     other_resources_for_deletion = get_other_resources(tag_key, tag_value, regions)
     resources_for_deletion.extend(other_resources_for_deletion)
     ordered_resources_for_deletion = order_resources_for_deletion(resources_for_deletion)
+
+    tf.header_print("\nResources queued for deletion:\n")
+
     print(json.dumps(ordered_resources_for_deletion, indent=4, default=str))
+    print()
+
+    if not ordered_resources_for_deletion:
+        tf.header_print("No resources found to delete. Exiting...")
+        return
 
     print(f"\n{len(ordered_resources_for_deletion)} resources queued for deletion. \n")
 
