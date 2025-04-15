@@ -823,15 +823,15 @@ def deregister_ami(arn: str, region: str) -> None:
 
     ami_id = arn.split("/")[-1]
 
-    tf.header_print(f"Deregistering AMI {ami_id} in {region}...")
+    tf.header_print(f"Deregistering AMI '{ami_id}' in {region}...")
 
     client = boto3.client("ec2", region_name=region)
     response = client.deregister_image(ImageId=ami_id)
 
     if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-        tf.success_print(f"AMI {ami_id} was successfully deregistered")
+        tf.success_print(f"AMI '{ami_id}' was successfully deregistered")
     else:
-        tf.failure_print(f"AMI {ami_id} was not successfully deregistered")
+        tf.failure_print(f"AMI '{ami_id}' was not successfully deregistered")
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
@@ -883,7 +883,7 @@ def delete_ec2_instance(arn: str, region: str, autoscaling: bool = False) -> Non
     instance_status = response["Reservations"][0]["Instances"][0]["State"]["Name"]
 
     if instance_status in ["terminated", "shutting-down"]:
-        tf.success_print(f"Current status of EC2 instance '{instance_id}' is: {instance_status}. Skipping...\n")
+        tf.success_print(f"Current status of EC2 instance '{instance_id}' is: '{instance_status}'. Skipping...\n")
         return
 
     try:
@@ -927,14 +927,14 @@ def ec2_waiter(instance_ids: list[str], region: str) -> None:
 def release_eip(arn: str, region: str) -> None:
     """Release an elastic IP address in a given region by ARN."""
 
-    tf.header_print(f"Releasing Elastic IP {arn} in {region}...")
+    tf.header_print(f"Releasing Elastic IP '{arn}' in {region}...")
     client = boto3.client("ec2", region_name=region)
     allocation_id = arn.split("/")[-1]
     response = client.release_address(AllocationId=allocation_id)
     if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-        tf.success_print(f"Elastic IP {allocation_id} was successfully released")
+        tf.success_print(f"Elastic IP '{arn}' was successfully released")
     else:
-        tf.failure_print(f"Elastic IP {allocation_id} was not successfully released")
+        tf.failure_print(f"Elastic IP '{arn}' was not successfully released")
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
@@ -952,7 +952,7 @@ def delete_internet_gateway(arn: str, region: str) -> None:
 
     client = boto3.client("ec2", region_name=region)
     gateway_id = arn.split("/")[-1]
-    tf.header_print(f"Deleting Internet Gateway {gateway_id} in {region}...")
+    tf.header_print(f"Deleting Internet Gateway '{gateway_id}' in {region}...")
 
     # Detach Internet Gateway if it is attached to a VPC
     tf.subheader_print("Checking for VPC attachments...")
@@ -964,10 +964,10 @@ def delete_internet_gateway(arn: str, region: str) -> None:
             vpc_id = attachment.get("VpcId")
             if vpc_id:
                 client.detach_internet_gateway(InternetGatewayId=gateway_id, VpcId=vpc_id)
-                tf.success_print(f"Internet Gateway {gateway_id} was successfully detached from VPC {vpc_id}")
+                tf.success_print(f"Internet Gateway '{gateway_id}' was successfully detached from VPC {vpc_id}")
 
     except botocore.exceptions.ClientError as e:
-        tf.failure_print(f"Failed to detach Internet Gateway {gateway_id}, error: {str(e)}")
+        tf.failure_print(f"Failed to detach Internet Gateway '{gateway_id}', error: {str(e)}")
         return
 
     print()
@@ -977,13 +977,13 @@ def delete_internet_gateway(arn: str, region: str) -> None:
     try:
         response = client.delete_internet_gateway(InternetGatewayId=gateway_id)
         if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-            tf.success_print(f"Internet gateway {gateway_id} was successfully deleted")
+            tf.success_print(f"Internet gateway '{gateway_id}' was successfully deleted")
         else:
-            tf.failure_print(f"Internet gateway {gateway_id} was not successfully deleted")
+            tf.failure_print(f"Internet gateway '{gateway_id}' was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
 
     except botocore.exceptions.ClientError as e:
-        tf.failure_print(f"Failed to delete {gateway_id}: {str(e)}\n")
+        tf.failure_print(f"Failed to delete '{gateway_id}': {str(e)}\n")
 
 
 def delete_launch_template(arn: str, region: str) -> None:
@@ -1004,14 +1004,14 @@ def delete_launch_template(arn: str, region: str) -> None:
     client = boto3.client("ec2", region_name=region)
     template_id = arn.split("/")[-1]
 
-    tf.header_print(f"Deleting Launch Template {template_id} in {region}...")
+    tf.header_print(f"Deleting Launch Template '{template_id}' in {region}...")
 
     try:
         response = client.delete_launch_template(LaunchTemplateId=template_id)
         if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-            tf.success_print(f"Launch template {template_id} was successfully deleted")
+            tf.success_print(f"Launch template '{template_id}' was successfully deleted")
         else:
-            tf.failure_print(f"Launch template {template_id} was not successfully deleted")
+            tf.failure_print(f"Launch template '{template_id}' was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
 
     except botocore.exceptions.ClientError:
@@ -1033,26 +1033,26 @@ def delete_nat_gateway(arn: str, region: str) -> None:
 
     client = boto3.client("ec2", region_name=region)
     nat_gateway_id = arn.split("/")[-1]
-    tf.header_print(f"Deleting Nat Gateway {nat_gateway_id} in {region}...")
+    tf.header_print(f"Deleting Nat Gateway '{nat_gateway_id}' in {region}...")
     deleted = client.describe_nat_gateways(NatGatewayIds=[nat_gateway_id])["NatGateways"][0]["State"]
 
     # consider calling the waiter here if status is 'deleting'
     if deleted == "deleted" or deleted == "deleting":
-        tf.success_print(f"Nat gateway {nat_gateway_id} was already deleted")
+        tf.success_print(f"Nat gateway '{nat_gateway_id}' was already deleted")
         return
     try:
         response = client.delete_nat_gateway(NatGatewayId=nat_gateway_id)
-        tf.indent_print(f"Nat gateway {nat_gateway_id} deletion initiated")
+        tf.indent_print(f"Nat gateway '{nat_gateway_id}' deletion initiated")
         tf.indent_print("Waiting for NAT Gateway to complete deletion process...\n")
         nat_deleted = client.get_waiter("nat_gateway_deleted")
         nat_deleted.wait(
             NatGatewayIds=[nat_gateway_id],
             WaiterConfig={"Delay": 10, "MaxAttempts": 12},
         )
-        tf.success_print(f"Nat gateway {nat_gateway_id} has been fully deleted")
+        tf.success_print(f"Nat gateway '{nat_gateway_id}' has been fully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
     except Exception as e:
-        tf.failure_print(f"Nat gateway {nat_gateway_id} was not fully deleted: {e}\n")
+        tf.failure_print(f"Nat gateway '{nat_gateway_id}' was not fully deleted: {e}\n")
         return
 
 
@@ -1061,13 +1061,13 @@ def delete_route_table(arn: str, region: str) -> None:
 
     client = boto3.client("ec2", region_name=region)
     route_table_id = arn.split("/")[-1]
-    tf.header_print(f"Deleting route table {route_table_id} in {region}...")
+    tf.header_print(f"Deleting route table '{route_table_id}' in {region}...")
 
     response = client.delete_route_table(RouteTableId=route_table_id)
     if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-        tf.success_print(f"Route table {route_table_id} was successfully deleted")
+        tf.success_print(f"Route table '{route_table_id}' was successfully deleted")
     else:
-        tf.failure_print(f"Route table {route_table_id} was not successfully deleted")
+        tf.failure_print(f"Route table '{route_table_id}' was not successfully deleted")
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
@@ -1099,9 +1099,9 @@ def delete_security_group(arn: str, region: str, vpc_funct: bool = False) -> Non
     try:
         response = client.delete_security_group(GroupId=sg_id)
         if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-            tf.success_print(f"Security group {sg_id} was successfully deleted")
+            tf.success_print(f"Security group '{sg_id}' was successfully deleted")
         else:
-            tf.failure_print(f"Security group {sg_id} was not successfully deleted")
+            tf.failure_print(f"Security group '{sg_id}' was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
 
     except:
@@ -1113,15 +1113,15 @@ def delete_snapshot(arn: str, region: str) -> None:
 
     snapshot_id = arn.split("/")[-1]
 
-    tf.header_print(f"Deleting snapshot {snapshot_id} in {region}...")
+    tf.header_print(f"Deleting snapshot '{snapshot_id}' in {region}...")
 
     client = boto3.client("ec2", region_name=region)
     try:
         response = client.delete_snapshot(SnapshotId=snapshot_id)
         if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-            tf.success_print(f"Snapshot {snapshot_id} was successfully deleted")
+            tf.success_print(f"Snapshot '{snapshot_id}' was successfully deleted")
         else:
-            tf.failure_print(f"Snapshot {snapshot_id} was not successfully deleted")
+            tf.failure_print(f"Snapshot '{snapshot_id}' was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
 
     except botocore.exceptions.ClientError as e:
@@ -1152,7 +1152,7 @@ def delete_subnet(arn: str, region: str) -> None:
     client = boto3.client("ec2", region_name=region)
     subnet_id = arn.split("/")[-1]
 
-    tf.header_print(f"Deleting subnet {subnet_id} in {region}...")
+    tf.header_print(f"Deleting subnet '{subnet_id}' in {region}...")
 
     # Find any route tables associated with the subnet and detach them
     tf.indent_print("Looking for associated route tables...\n")
@@ -1169,17 +1169,17 @@ def delete_subnet(arn: str, region: str) -> None:
 
     # Disassociate route tables from subnet if they are associated
     if associations:
-        tf.indent_print(f"Route tables associated with subnet {subnet_id}:\n")
+        tf.indent_print(f"Route tables associated with subnet '{subnet_id}':\n")
         for rt in associations:
             tf.indent_print(rt["route_table_id"], indent=6)
         print()
-        tf.indent_print(f"Disassociating route tables from subnet {subnet_id}...")
+        tf.indent_print(f"Disassociating route tables from subnet '{subnet_id}'...")
         for rt in associations:
             response = client.disassociate_route_table(AssociationId=rt["association_id"])
             if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-                tf.success_print(f"Route table {rt['route_table_id']} was successfully disassociated from subnet {subnet_id}")
+                tf.success_print(f"Route table {rt['route_table_id']} was successfully disassociated from subnet '{subnet_id}'")
             else:
-                tf.failure_print(f"Route table {rt['route_table_id']} was not successfully disassociated from subnet {subnet_id}")
+                tf.failure_print(f"Route table {rt['route_table_id']} was not successfully disassociated from subnet '{subnet_id}'")
             tf.response_print(json.dumps(response, indent=4, default=str))
 
     # # Check for any ENIs in the subnet
@@ -1202,9 +1202,9 @@ def delete_subnet(arn: str, region: str) -> None:
     tf.indent_print("Initiating subnet deletion...\n")
     response = client.delete_subnet(SubnetId=subnet_id)
     if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-        tf.success_print(f"Subnet {subnet_id} was successfully deleted")
+        tf.success_print(f"Subnet '{subnet_id}' was successfully deleted")
     else:
-        tf.failure_print(f"Subnet {subnet_id} was not successfully deleted")
+        tf.failure_print(f"Subnet '{subnet_id}' was not successfully deleted")
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
@@ -1222,7 +1222,7 @@ def delete_vpc_endpoint(arn: str, region: str) -> None:
 
     client = boto3.client("ec2", region_name=region)
     endpoint_id = arn.split("/")[-1]
-    tf.header_print(f"Deleting VPC endpoint {endpoint_id} in {region}...")
+    tf.header_print(f"Deleting VPC endpoint '{endpoint_id}' in {region}...")
     try:
         response = client.delete_vpc_endpoints(VpcEndpointIds=[endpoint_id])
 
@@ -1234,21 +1234,21 @@ def delete_vpc_endpoint(arn: str, region: str) -> None:
 
                 # Handle specific known error
                 if error_code == "InvalidVpcEndpoint.NotFound":
-                    tf.success_print(f"VPC endpoint {resource_id} was already deleted.")
+                    tf.success_print(f"VPC endpoint '{resource_id}' was already deleted.")
                 else:
-                    tf.failure_print(f"Failed to delete VPC endpoint {resource_id}: {error_code} - {error_msg}")
+                    tf.failure_print(f"Failed to delete VPC endpoint '{resource_id}': {error_code} - {error_msg}")
                 tf.response_print(json.dumps(response, indent=4, default=str))
                 return
 
         # If deletion is successful
         if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-            tf.success_print(f"VPC endpoint {endpoint_id} was successfully deleted")
+            tf.success_print(f"VPC endpoint '{endpoint_id}' was successfully deleted")
         else:
-            tf.failure_print(f"VPC endpoint {endpoint_id} was not successfully delete")
+            tf.failure_print(f"VPC endpoint '{endpoint_id}' was not successfully delete")
         tf.response_print(json.dumps(response, indent=4, default=str))
 
     except botocore.exceptions.ClientError as e:
-        tf.failure_print(f"Failed to delete VPC endpoint {endpoint_id}: {str(e)}\n")
+        tf.failure_print(f"Failed to delete VPC endpoint '{endpoint_id}': {str(e)}\n")
         return None
 
 
@@ -1269,8 +1269,8 @@ def delete_vpc(arn: str, region: str) -> list[dict] | None:
 
     client = boto3.client("ec2", region_name=region)
     vpc_id = arn.split("/")[-1]
-    tf.header_print(f"Deleting VPC {vpc_id} in {region}...")
-    tf.subheader_print(f"Checking VPC {vpc_id} for security groups...")
+    tf.header_print(f"Deleting VPC '{vpc_id}' in {region}...")
+    tf.subheader_print(f"Checking VPC '{vpc_id}' for security groups...")
 
     response = client.describe_security_groups(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
     security_groups = response["SecurityGroups"]
@@ -1290,10 +1290,10 @@ def delete_vpc(arn: str, region: str) -> list[dict] | None:
         except botocore.exceptions.ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
             if error_code == "InvalidGroup.NotFound":
-                tf.success_print(f"Security group {sg_arn} already deleted.")
+                tf.success_print(f"Security group '{sg_arn}' already deleted.")
                 continue
             else:
-                tf.failure_print(f"Error deleting security group {sg_arn}: {e}")
+                tf.failure_print(f"Error deleting security group '{sg_arn}': {e}")
                 security_group_retries.append(
                     {
                         "resource_type": "security_group",
@@ -1310,9 +1310,9 @@ def delete_vpc(arn: str, region: str) -> list[dict] | None:
         status_code = response["ResponseMetadata"]["HTTPStatusCode"]
 
         if 200 <= status_code < 300:
-            tf.success_print(f"VPC {vpc_id} was successfully deleted")
+            tf.success_print(f"VPC '{vpc_id}' was successfully deleted")
         else:
-            tf.failure_print(f"VPC {vpc_id} was not successfully deleted")
+            tf.failure_print(f"VPC '{vpc_id}' was not successfully deleted")
             tf.response_print(json.dumps(response, indent=4, default=str))
             raise botocore.exceptions.ClientError(
                 error_response={

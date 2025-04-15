@@ -207,6 +207,7 @@ def order_resources_for_deletion(
                 "natgateway",
                 "routetable",
                 "subnet",
+                "securitygroup",
                 "transitgatewayattachment",
                 "vpcendpoint",
                 "vpc",
@@ -254,6 +255,7 @@ def order_resources_for_deletion(
     ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "eip"])
     ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "internetgateway"])
     ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "routetable"])
+    ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "securitygroup"])
     ordered_resources.extend([r for r in ordered_networking_resources if r["resource_type"] == "vpc"])
 
     return ordered_resources
