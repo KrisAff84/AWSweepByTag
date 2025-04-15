@@ -54,6 +54,7 @@ Functions By Service:
 """
 
 import time
+from datetime import datetime
 import json
 import botocore.exceptions
 import boto3
@@ -114,7 +115,7 @@ def delete_api(arn: str, region: str) -> list[dict] | None:
     if vpc_link_ids:
         vpc_links_for_retry = []
         vpc_links_successful_delete = []
-        delete_vpc_links = tf.prompt(f'Found {len(vpc_link_ids)} VPC link(s) associated with API {arn}. Delete them?')
+        delete_vpc_links = tf.y_n_prompt(f'Found {len(vpc_link_ids)} VPC link(s) associated with API {arn}. Delete them?')
         print()
         if delete_vpc_links != 'y':
             tf.indent_print("VPC links will not be deleted")
@@ -179,7 +180,7 @@ def delete_rest_api(arn: str, region: str) -> None:
     # Prompts user to delete VPC links if they exist.
     if vpc_link_ids:
         delete_vpc_links = 'n'
-        delete_vpc_links = tf.prompt(f"Found {len(vpc_link_ids)} VPC link(s) associated with REST API {arn}. Delete them?")
+        delete_vpc_links = tf.y_n_prompt(f"Found {len(vpc_link_ids)} VPC link(s) associated with REST API {arn}. Delete them?")
         if delete_vpc_links != 'y':
             tf.indent_print("VPC links will not be deleted.")
         else:
@@ -626,17 +627,89 @@ def wait_for_distribution_disabled(arn: str) -> None:
 
 ######################## DynamoDB Service ###########################
 
-def create_dynamodb_table_backup(arn: str, region: str) -> str:
+def create_dynamodb_table_backup(arn: str, region: str) -> bool:
     """
     Create a backup of a DynamoDB table
 
-    Needs to be optionally called after a prompt in the delete_dynamodb_table function
-    after giving warning about table not being empty.
+    Called by delete_dynamodb_function if table is not empty.
+
+    1. Prompts user if they would like to create backup - if not, returns False
+    2. Prompts user for a name for the backup or accepts default
+    3. Attempts to create backup with a max of 5 retries, with exponential backoff (starting at 1 second)
+    4. If backup is created successfully, returns False. If not, returns True to prompt user for deletion
+
+    Args:
+        arn (str): The ARN of the DynamoDB table to backup
+        region (str): The region the DynamoDB table is in
+
+    Returns:
+        bool: True if user needs to be prompted for deletion (if backup creation fails)
     """
-    pass
+
+    table_name = arn.split('/')[-1]
+    client = boto3.client('dynamodb', region_name=region)
+
+    backup = tf.y_n_prompt(f"Would you like to create a backup before deleting table '{table_name}'?")
+    print()
+
+    if backup != "y":
+        tf.indent_print("Skipping backup creation...")
+        return False
+
+    else:
+        # Prompt users to enter a name for the backup or accept default (<table_name>-<timestamp in YYYYMMDD-HHMMSS format>)
+        # If a name is provided, it will be prefixed to table name but still append timestamp (<table_name>-<user_name>-<timestamp>)
+        tf.indent_print("Optional: Enter a suffix for the backup name or press Enter to accept the default")
+        tf.indent_print("Default: {table_name}-{timestamp} | With suffix: {table_name}-{user_suffix}-{timestamp}")
+        table_suffix = tf.custom_prompt("Optional suffix: ")
+        print()
+        tf.subheader_print(f"Creating backup for DynamoDB table '{table_name}'...")
+        table_suffix = f"{table_suffix}-" if table_suffix else ""
+        backup_prefix = f"{table_name}-{table_suffix}"
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_name = f"{backup_prefix}{timestamp}"
+
+        max_retries = 5
+        retry_delay = 1
+        retry_number = 0
+
+        while retry_number < max_retries:
+            try:
+                response = client.create_backup(
+                    TableName=table_name,
+                    BackupName=backup_name
+                )
+
+                if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
+                    tf.success_print("Backup created successfully:")
+                    tf.response_print(json.dumps(response, indent=4, default=str))
+                    return False
+                else:
+                    tf.failure_print("Backup creation failed:")
+                    tf.response_print(json.dumps(response, indent=4, default=str))
+                    retry_number += 1
+                    time.sleep(retry_delay)
+                    retry_delay += 1
+
+            except botocore.exceptions.ClientError as e:
+                error_code = e.response['Error']['Code']
+
+                if error_code == 'TableNotFoundException':
+                    tf.indent_print(f"Could not create backup because of error '{error_code}'.")
+                    return False
+
+                else:
+                    tf.failure_print(f"Error backing up DynamoDB table {table_name}: {e}\n")
+                    tf.indent_print("Trying again...")
+                    retry_number += 1
+                    time.sleep(retry_delay)
+                    retry_delay += 1
+
+        tf.failure_print("Max retries reached. Skipping backup creation...")
+        return True
 
 
-def delete_dynamodb_table(arn: str, region: str) -> None:
+def delete_dynamodb_table(arn: str, region: str) -> list[dict] | None:
     """
     Delete a DynamoDB table.
 
@@ -646,14 +719,22 @@ def delete_dynamodb_table(arn: str, region: str) -> None:
     3. Deletion protection is disabled if user confirms
     4. Table is checked for items by a scan with a limit of 1
     5. If items are found, user is warned and prompted to delete them and the table
-    6. If billing mode is PROVISIONED, application autoscaling policies and targets are checked for and deleted
+    6. If user confirms, create_dynamodb_table_backup is called to prompt user to create backup
+    7. If billing mode is PROVISIONED, application autoscaling policies and targets are checked for and deleted
+    8. Table is deleted - if failure response table is returned for retry.
 
     Args:
         arn (str): The ARN of the DynamoDB table to delete
         region (str): The region the DynamoDB table is in
+
+    Returns:
+        list[dict] - Table that is marked for retry in case of failure, or None if no retries are needed
+
+    Raises:
+        botocore.exceptions.ClientError - Retries handled in delete_resource function.
     """
 
-    tf.header_print(f"Deleting DynamoDB table {arn} in {region}...")
+    tf.header_print(f"Deleting DynamoDB table '{arn}' in {region}...")
     client = boto3.client('dynamodb', region_name=region)
     table_name = arn.split('/')[-1]
     service_namespace = 'dynamodb'
@@ -665,14 +746,14 @@ def delete_dynamodb_table(arn: str, region: str) -> None:
         billing_mode = table_info.get('BillingModeSummary', {}).get('BillingMode', 'Unknown')
 
     except client.exceptions.ResourceNotFoundException:
-        tf.indent_print(f"Table {table_name} does not exist. It's possible that it has been deleted already.")
+        tf.indent_print(f"Table '{table_name}' does not exist. It's possible that it has been deleted already.")
         return
 
     deletion_protection = table_info.get('DeletionProtectionEnabled', False)
     if deletion_protection:
-        disable_protection = tf.warning_confirmation(f'Table {table_name} has deletion protection enabled. Disable it?')
+        disable_protection = tf.warning_confirmation(f"Table '{table_name}' has deletion protection enabled. Disable it?")
         if disable_protection != 'yes':
-            tf.indent_print(f"Skipping deletion of DynamoDB table {table_name}")
+            tf.indent_print(f"Skipping deletion of DynamoDB table '{table_name}'")
             return
 
         # Disable deletion protection
@@ -680,25 +761,45 @@ def delete_dynamodb_table(arn: str, region: str) -> None:
             TableName=table_name,
             DeletionProtectionEnabled=False
         )
-        tf.success_print(f"Deletion protection disabled for table {table_name}")
+        tf.success_print(f"Deletion protection disabled for table '{table_name}'")
         tf.response_print(json.dumps(response, indent=4, default=str))
 
     # Check if table has items
     response = client.scan(TableName=table_name, Limit=1)
     if len(response.get('Items', [])) > 0:
-        confirm = tf.warning_confirmation(f'Table {table_name} is not empty. Delete all items and the table?')
+        confirm = tf.warning_confirmation(f"Table '{table_name}' is not empty. Delete all items and the table?")
+        print()
         if confirm != 'yes':
-            tf.indent_print(f"Skipping deletion of DynamoDB table {table_name}")
+            tf.indent_print(f"Skipping deletion of DynamoDB table '{table_name}'")
             return
 
+        # Prompt and create backup if table is not empty
+
+        prompt_for_deletion = create_dynamodb_table_backup(arn, region)
+
+        if prompt_for_deletion:
+            delete = tf.warning_confirmation(f"Backup of table '{table_name}' could not be created. Do you still want to delete the table?")
+
+            if delete != 'yes':
+                tf.indent_print(f"Skipping deletion of DynamoDB table '{table_name}'...")
+                return
+
+
     # Delete the table
+    tf.subheader_print(f"Proceeding with deletion of DynamoDB table '{table_name}'")
     print()
     try:
         response = client.delete_table(TableName=table_name)
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-            tf.success_print(f"Table {table_name} was successfully deleted")
+            tf.success_print(f"Table '{table_name}' was successfully deleted")
         else:
-            tf.failure_print(f"Table {table_name} was not successfully deleted")
+            tf.failure_print(f"Table '{table_name}' was not successfully deleted")
+            return [{
+                "resource_type": "table",
+                "service": "dynamodb",
+                "arn": arn,
+                "region": region
+            }]
         tf.response_print(json.dumps(response, indent=4, default=str))
 
         if billing_mode == 'PAY_PER_REQUEST':
@@ -713,14 +814,14 @@ def delete_dynamodb_table(arn: str, region: str) -> None:
     except botocore.exceptions.ClientError as e:
         error_code = e.response['Error']['Code']
         if error_code == 'ValidationException' and 'has acted as a source region for new replica(s)' in e.response['Error']['Message']:
-            tf.failure_print(f"Cannot delete table {table_name}: It was used to provision replicas in the last 24 hours.\n")
-            tf.failure_print("You must either:", 6)
-            tf.failure_print("1. Wait 24 hours from the time of provisioning replicas to retry", 8)
-            tf.failure_print("2. Delete the replica(s) and/or main table via the AWS console\n", 8)
+            tf.failure_print(f"Cannot delete table '{table_name}': It was used to provision replicas in the last 24 hours.\n")
+            tf.indent_print("You must either:", 6)
+            tf.indent_print("1. Wait 24 hours from the time of provisioning replicas to retry", 8)
+            tf.indent_print("2. Delete the replica(s) and/or main table via the AWS console\n", 8)
             return
+
         else:
-            tf.failure_print(f"Error deleting DynamoDB table {table_name}: {e}\n")
-            return
+            raise
 
 ########################### EC2 Service #############################
 
@@ -1299,7 +1400,7 @@ def delete_elastic_load_balancer(arn: str, region: str) -> None:
     for tg in target_group_arns:
         tf.indent_print(tg, 8)
     print()
-    delete_tgs_and_listeners = tf.prompt("Proceed with deletion process?")
+    delete_tgs_and_listeners = tf.y_n_prompt("Proceed with deletion process?")
     print()
 
     if delete_tgs_and_listeners != 'y':
@@ -1501,7 +1602,7 @@ def delete_sns_topic(arn: str, region: str) -> None:
         tf.indent_print(f"{tf.Format.yellow}SNS topic has the following subscriptions:{tf.Format.end}")
         for subscription in subscriptions:
             tf.indent_print(json.dumps(subscription, indent=4, default=str), 6)
-        confirm = tf.prompt("Do you wish to proceed with deleting the topic and all of its subscriptions?")
+        confirm = tf.y_n_prompt("Do you wish to proceed with deleting the topic and all of its subscriptions?")
 
         if confirm != 'y':
             tf.indent_print("Skipping SNS topic deletion...\n")

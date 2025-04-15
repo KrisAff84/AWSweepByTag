@@ -22,6 +22,7 @@ class Format:
     green = '\033[32m'
     red = '\033[31m'
 
+
 def header_print(text: str, indent: int = 0) -> None:
     """
     Format text as a header and print it
@@ -34,6 +35,7 @@ def header_print(text: str, indent: int = 0) -> None:
     """
     print(Format.blue + ' ' * indent + text + Format.end)
     print()
+
 
 def subheader_print(text: str, indent: int=4) -> None:
     """
@@ -48,6 +50,7 @@ def subheader_print(text: str, indent: int=4) -> None:
     print(Format.cyan + ' ' * indent + text + Format.end)
     print()
 
+
 def indent_print(text: str, indent: int=4) -> None:
     """
     Indent text and print it
@@ -59,6 +62,7 @@ def indent_print(text: str, indent: int=4) -> None:
         indent (int, optional): Number of spaces to indent the text. Defaults to 4.
     """
     print(' ' * indent + text)
+
 
 def success_print(text: str, indent: int=4) -> None:
     """
@@ -72,6 +76,7 @@ def success_print(text: str, indent: int=4) -> None:
     """
     print(Format.green + ' ' * indent + text + Format.end)
 
+
 def failure_print(text: str, indent: int=4) -> None:
     """
     Format text as a failure message and print it
@@ -83,6 +88,7 @@ def failure_print(text: str, indent: int=4) -> None:
         indent (int, optional): Number of spaces to indent the text. Defaults to 4.
     """
     print(Format.red + ' ' * indent + text + Format.end)
+
 
 def response_print(text: str, indent: int=6) -> None:
     """
@@ -100,10 +106,12 @@ def response_print(text: str, indent: int=6) -> None:
         print(indent_str + line)
     print()
 
-def prompt(text: str, indent: int=4) -> str:
+
+def y_n_prompt(text: str, indent: int=4) -> str:
     """
     Format text as a prompt and return the user's response
 
+    For use with yes/no prompts.
     Accepts text and displays as a prompt, adding (y/n) at the end, then
     returns the user's response as a string. Defaults to an indent of 4 spaces.
 
@@ -115,6 +123,24 @@ def prompt(text: str, indent: int=4) -> str:
         str: Input from the user, stripped and lowercased.
     """
     return input(f"{' ' * indent}{text} (y/n): ").strip().lower()
+
+
+def custom_prompt(text: str, indent: int=4) -> str:
+    """
+    Format text as a prompt and return the user's response
+
+    Accepts text and displays as a prompt, then returns the user's response as a string.
+    Defaults to an indent of 4 spaces.
+
+    Args:
+        text (str): Text to display as a prompt
+        indent (int, optional): Number of spaced to indent the prompt text. Defaults to 4.
+
+    Returns:
+        str: Input from the user, stripped.
+    """
+    return input(f"{' ' * indent}{text}: ").strip()
+
 
 def warning_confirmation(text: str, indent: int=4) -> str:
     """
