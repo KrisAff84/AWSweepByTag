@@ -59,8 +59,10 @@ The plan is to gradually add more supported resources, but these are the resourc
 - EC2 Instances
 - EIPs
 - Internet Gateways
+- Launch Templates
 - NAT Gateways
 - Route Tables
+- Security Groups
 - Subnets
 - VPC Endpoints
 - VPCs
