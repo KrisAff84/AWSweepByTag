@@ -124,7 +124,7 @@ def delete_api(arn: str, region: str) -> list[dict] | None:
             for vpc_link_id in vpc_link_ids:
                 vpc_link = delete_vpc_link(vpc_link_id, region, True)
                 if vpc_link:
-                    vpc_links_for_retry.append(vpc_link)
+                    vpc_links_for_retry.extend(vpc_link)
                 else:
                     vpc_links_successful_delete.append(vpc_link_id)
 
@@ -246,7 +246,7 @@ def delete_rest_api(arn: str, region: str) -> None:
     print()
 
 
-def delete_vpc_link(vpc_link_id: str, region: str, apigw_function: bool=False) -> dict | None:
+def delete_vpc_link(vpc_link_id: str, region: str, apigw_function: bool=False) -> list[dict] | None:
     """
     Delete VPC Link in a given region by VPC Link ID.
 
@@ -291,7 +291,7 @@ def delete_vpc_link(vpc_link_id: str, region: str, apigw_function: bool=False) -
             return resource
 
     except botocore.exceptions.ClientError:
-        return resource
+        return [resource]
 
 
 def vpc_link_waiter(vpc_link_ids: list, region: str) -> None:
@@ -865,7 +865,7 @@ def delete_internet_gateway(arn: str, region: str) -> None:
     tf.header_print(f"Deleting Internet Gateway {gateway_id} in {region}...")
 
     # Detach Internet Gateway if it is attached to a VPC
-    tf.indent_print("Checking for VPC attachments...")
+    tf.subheader_print("Checking for VPC attachments...")
     try:
         response = client.describe_internet_gateways(InternetGatewayIds=[gateway_id])
         attachments = response.get('InternetGateways', [])[0].get('Attachments', [])
@@ -883,7 +883,7 @@ def delete_internet_gateway(arn: str, region: str) -> None:
     print()
 
     # Delete Internet Gateway after it has been detached
-    tf.indent_print("Proceeding with deletion...")
+    tf.subheader_print("Proceeding with deletion...")
     try:
         response = client.delete_internet_gateway(InternetGatewayId=gateway_id)
         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
@@ -985,13 +985,14 @@ def delete_route_table(arn: str, region: str) -> None:
 
 
 # May need to add a step to detach from VPC to avoid dependency issues
-def delete_security_group(arn: str, region: str) -> None:
+def delete_security_group(arn: str, region: str, vpc_funct: bool=False) -> None:
     """
     Delete a security group in a given region by ARN
 
     Args:
         arn (str): The ARN of the security group to delete
         region (str): The region the security group is in
+        vpc_funct: (bool, optional): Whether or not the function was called by delete_vpc. Defaults to False.
 
     Returns:
         None
@@ -1003,7 +1004,10 @@ def delete_security_group(arn: str, region: str) -> None:
     client = boto3.client('ec2', region_name=region)
     sg_id = arn.split('/')[-1]
 
-    tf.header_print(f"Deleting security group {sg_id} in {region}...")
+    if vpc_funct:
+        tf.subheader_print(f"Deleting security group '{sg_id}' in {region}...")
+    else:
+        tf.header_print(f"Deleting security group '{sg_id}' in {region}...")
 
     try:
         response = client.delete_security_group(GroupId=sg_id)
@@ -1013,8 +1017,9 @@ def delete_security_group(arn: str, region: str) -> None:
             tf.failure_print(f"Security group {sg_id} was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
 
-    except botocore.exceptions.ClientError:
+    except:
         raise
+
 
 
 def delete_snapshot(arn: str, region: str) -> None:
@@ -1162,7 +1167,7 @@ def delete_vpc_endpoint(arn: str, region: str) -> None:
         return None
 
 
-def delete_vpc(arn: str, region: str) -> None:
+def delete_vpc(arn: str, region: str) -> list[dict] | None:
     """
     Deletes a VPC and all of its security groups in a given region by ARN
 
@@ -1172,36 +1177,68 @@ def delete_vpc(arn: str, region: str) -> None:
     Args:
         arn (str): The ARN of the VPC to delete
         region (str): The region the VPC is in
+
+    Returns:
+        list[dict] | None: Retryable security groups that could not be deleted, or None if they were all successfully deleted
     """
 
     client = boto3.client('ec2', region_name=region)
     vpc_id = arn.split('/')[-1]
     tf.header_print(f"Deleting VPC {vpc_id} in {region}...")
-    tf.indent_print((f"Checking VPC {vpc_id} for security groups...\n"))
+    tf.subheader_print(f"Checking VPC {vpc_id} for security groups...")
 
     response = client.describe_security_groups(Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}])
     security_groups = response['SecurityGroups']
 
+    security_group_retries = []
     for sg in security_groups:
         if sg['GroupName'] == 'default':
             continue
-        sg_id = sg['GroupId']
-        tf.indent_print(f"Deleting security group {sg_id}...")
-        response = client.delete_security_group(GroupId=sg_id)
-        if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-            tf.success_print(f"Security group {sg_id} was successfully deleted")
+
+        sg_arn = sg.get("SecurityGroupArn")
+        if not sg_arn:
+            sg_arn = f"arn:aws:ec2:{region}:{sg['OwnerId']}:security-group/{sg['GroupId']}"
+
+        try:
+            delete_security_group(sg_arn, region, True)
+
+        except botocore.exceptions.ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code == 'InvalidGroup.NotFound':
+                tf.success_print(f"Security group {sg_arn} already deleted.")
+                continue
+            else:
+                tf.failure_print(f"Error deleting security group {sg_arn}: {e}")
+                security_group_retries.append({
+                    "resource_type": "security_group",
+                    "service": "ec2",
+                    "region": region,
+                    "resource_id": sg_arn
+                })
+
+    tf.subheader_print("Deleting VPC...")
+    print()
+    try:
+        response = client.delete_vpc(VpcId=vpc_id)
+        status_code = response['ResponseMetadata']['HTTPStatusCode']
+
+        if 200 <= status_code < 300:
+            tf.success_print(f"VPC {vpc_id} was successfully deleted")
         else:
-            tf.failure_print(f"Security group {sg_id} was not successfully deleted")
+            tf.failure_print(f"VPC {vpc_id} was not successfully deleted")
+            tf.response_print(json.dumps(response, indent=4, default=str))
+            raise botocore.exceptions.ClientError(
+                error_response={"Error": {"Code": "DependencyViolation", "Message": "VPC deletion failed"}},
+                operation_name="DeleteVpc"
+            )
+
         tf.response_print(json.dumps(response, indent=4, default=str))
 
-    response = client.delete_vpc(VpcId=vpc_id)
-    tf.indent_print("Deleting VPC...")
-    print()
-    if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-        tf.success_print(f"VPC {vpc_id} was successfully deleted")
-    else:
-        tf.failure_print(f"VPC {vpc_id} was not successfully deleted")
-    tf.response_print(json.dumps(response, indent=4, default=str))
+    except botocore.exceptions.ClientError:
+        raise
+
+    if security_group_retries:
+        return security_group_retries
 
 
 ########################## ELBv2 Service ############################
