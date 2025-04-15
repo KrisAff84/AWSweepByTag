@@ -132,3 +132,6 @@ def warning_confirmation(text: str, indent: int=4) -> str:
         str: Input from the user, stripped and lowercased.
     """
     return input(f"{Format.yellow}{' ' * indent}***** WARNING ***** : {text} (yes/no): {Format.end}").strip().lower()
+
+
+

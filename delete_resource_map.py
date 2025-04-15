@@ -7,7 +7,8 @@ DELETE_FUNCTIONS = {
         'restapi': df.delete_rest_api # For REST APIs
     },
     'apigatewayv2': {
-        'api': df.delete_api # For HTTP and websocket APIs
+        'api': df.delete_api, # For HTTP and websocket APIs
+        "vpclink": df.delete_vpc_link
     },
     'autoscaling': {
         'autoscalinggroup': df.delete_autoscaling_group
@@ -26,10 +27,11 @@ DELETE_FUNCTIONS = {
         'eip': df.release_eip,
         'instance': df.delete_ec2_instance,
         'internetgateway': df.delete_internet_gateway,
+        'launchtemplate': df.delete_launch_template,
         'natgateway': df.delete_nat_gateway,  # delete_nat_gateway(resource['arn'])
         'route': lambda resource: print("deleting route"),  # delete_route(resource['arn'])
         'routetable': df.delete_route_table,
-        'security_group': lambda resource: print("deleting security group"),  # delete_security_group(resource['arn'])
+        'securitygroup': df.delete_security_group,
         'snapshot': df.delete_snapshot,
         'subnet': df.delete_subnet,
         'transitgatewayattachment': lambda resource: print("deleting transit gateway attachment"),  # delete_transit_gateway_vpc_attachment(resource['arn'])
