@@ -1,4 +1,4 @@
-'''
+"""
 Get IDs from resources that do not show up when using the 'resource-groups' client.
 
 Most resources can be gathered using the 'resource-groups' client, but not all of them.
@@ -8,7 +8,7 @@ from the 'resource-groups' client.
 Functions:
     - get_images: Gathers AMIs and associated snapshots and returns them as a list of dicts.
 
-'''
+"""
 
 import boto3
 import botocore.exceptions
@@ -37,37 +37,36 @@ def get_images(tag_key: str, tag_value: str, regions: list[str]) -> list[dict]:
     """
     resources = []
     for region in regions:
-        client = boto3.client('ec2', region_name=region)
+        client = boto3.client("ec2", region_name=region)
         try:
             response = client.describe_images(
-                Owners=['self'],
-                Filters=[
-                    {
-                        'Name': f'tag:{tag_key}',
-                        'Values': [tag_value]
-                    }
-                ]
+                Owners=["self"],
+                Filters=[{"Name": f"tag:{tag_key}", "Values": [tag_value]}],
             )
 
-            ami_ids = [image['ImageId'] for image in response['Images']]
+            ami_ids = [image["ImageId"] for image in response["Images"]]
             for ami in ami_ids:
-                resources.append({
-                    "resource_type": "ami",
-                    "resource_id": ami,
-                    "service": "ec2",
-                    "region": region
-                })
+                resources.append(
+                    {
+                        "resource_type": "ami",
+                        "resource_id": ami,
+                        "service": "ec2",
+                        "region": region,
+                    }
+                )
 
-            for image in response['Images']:
-                for mapping in image.get('BlockDeviceMappings', []):
-                    ebs = mapping.get('Ebs')
-                    if ebs and 'SnapshotId' in ebs:
-                        resources.append({
-                            "resource_type": "snapshot",
-                            "resource_id": ebs['SnapshotId'],
-                            "service": "ec2",
-                            "region": region
-                        })
+            for image in response["Images"]:
+                for mapping in image.get("BlockDeviceMappings", []):
+                    ebs = mapping.get("Ebs")
+                    if ebs and "SnapshotId" in ebs:
+                        resources.append(
+                            {
+                                "resource_type": "snapshot",
+                                "resource_id": ebs["SnapshotId"],
+                                "service": "ec2",
+                                "region": region,
+                            }
+                        )
 
         except botocore.exceptions.ClientError as e:
             tf.failure_print(f"Error querying AMIs in region {region}:")
@@ -97,22 +96,21 @@ def get_autoscaling_groups(tag_key: str, tag_value: str, regions: list[str]) -> 
     """
     resources = []
     for region in regions:
-        client = boto3.client('autoscaling', region_name=region)
+        client = boto3.client("autoscaling", region_name=region)
         try:
-            autoscaling_groups = client.describe_auto_scaling_groups(
-                Filters=[{
-                    'Name': f'tag:{tag_key}',
-                    'Values': [tag_value]
-                }]
-            ).get("AutoScalingGroups", [])
+            autoscaling_groups = client.describe_auto_scaling_groups(Filters=[{"Name": f"tag:{tag_key}", "Values": [tag_value]}]).get(
+                "AutoScalingGroups", []
+            )
 
             for asg in autoscaling_groups:
-                resources.append({
-                    "resource_type": "autoscalinggroup",
-                    "arn": asg["AutoScalingGroupARN"],
-                    "service": "autoscaling",
-                    "region": region
-                })
+                resources.append(
+                    {
+                        "resource_type": "autoscalinggroup",
+                        "arn": asg["AutoScalingGroupARN"],
+                        "service": "autoscaling",
+                        "region": region,
+                    }
+                )
 
         except botocore.exceptions.ClientError as e:
             tf.failure_print(f"Error querying ASGs in region {region}:")

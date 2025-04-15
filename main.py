@@ -6,49 +6,51 @@ import text_formatting as tf
 
 
 VALID_REGIONS = [
-   "us-east-1",
-   "us-east-2",
-   "us-west-1",
-   "us-west-2",
-   "af-south-1",
-   "ap-east-1",
-   "ap-south-1",
-   "ap-south-2",
-   "ap-southeast-1",
-   "ap-southeast-2",
-   "ap-southeast-3",
-   "ap-southeast-4",
-   "ap-southeast-5",
-   "ap-southeast-7",
-   "ap-northeast-1",
-   "ap-northeast-2",
-   "ap-northeast-3",
-   "ca-central-1",
-   "ca-west-1",
-   "eu-central-1",
-   "eu-central-2",
-   "eu-west-1",
-   "eu-west-2",
-   "eu-west-3",
-   "eu-south-1",
-   "eu-south-2",
-   "eu-north-1",
-   "il-central-1",
-   "mx-central-1",
-   "me-central-1",
-   "me-south-1",
-   "sa-east-1",
-   "cn-north-1",
-   "cn-northwest-1",
-   "us-gov-east-1",
-   "us-gov-west-1",
+    "us-east-1",
+    "us-east-2",
+    "us-west-1",
+    "us-west-2",
+    "af-south-1",
+    "ap-east-1",
+    "ap-south-1",
+    "ap-south-2",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-southeast-3",
+    "ap-southeast-4",
+    "ap-southeast-5",
+    "ap-southeast-7",
+    "ap-northeast-1",
+    "ap-northeast-2",
+    "ap-northeast-3",
+    "ca-central-1",
+    "ca-west-1",
+    "eu-central-1",
+    "eu-central-2",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-west-3",
+    "eu-south-1",
+    "eu-south-2",
+    "eu-north-1",
+    "il-central-1",
+    "mx-central-1",
+    "me-central-1",
+    "me-south-1",
+    "sa-east-1",
+    "cn-north-1",
+    "cn-northwest-1",
+    "us-gov-east-1",
+    "us-gov-west-1",
 ]
 
 
 def main():
     tag_key = input("Enter the tag key to search by: ")
     tag_value = input("Enter the tag value to search by: ")
-    regions = [r.strip() for r in input("Which region(s) would you like to search? (separate multiple regions with commas): ").lower().split(',')]
+    regions = [
+        r.strip() for r in input("Which region(s) would you like to search? (separate multiple regions with commas): ").lower().split(",")
+    ]
 
     invalid_regions = []
     for region in regions:
@@ -79,7 +81,6 @@ def main():
         tf.indent_print("Exiting...\n")
         return
 
-
     resources_for_deletion = []
 
     for resource in resources:
@@ -104,22 +105,24 @@ def main():
     # Figure out how to make this clearer
     delete = input("Are you sure you want to delete all of these resources? (y/n): ")
 
-    if delete.lower() != 'y':
+    if delete.lower() != "y":
         print("Exiting...")
         return
 
-    prompt = input("Do you want to be prompted before deleting each resource? Selecting 'n' will delete all resources automatically. (y/n): ")
+    prompt = input(
+        "Do you want to be prompted before deleting each resource? Selecting 'n' will delete all resources automatically. (y/n): "
+    )
     print()
 
     failed_deletions = []
 
     for resource in ordered_resources_for_deletion:
-        resource_name = resource.get('arn') or resource.get('resource_id')
+        resource_name = resource.get("arn") or resource.get("resource_id")
 
-        if prompt.lower() == 'y':
+        if prompt.lower() == "y":
             confirm = input(f"\nDo you want to delete the following resource?\n{json.dumps(resource, indent=4, default=str )}\n[y/n]?: ")
             print()
-            if confirm.lower() != 'y':
+            if confirm.lower() != "y":
                 print(f"Skipping deletion of {resource_name}")
                 continue
 
@@ -139,5 +142,5 @@ def main():
         tf.success_print("All resources were successfully deleted.\n", 0)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

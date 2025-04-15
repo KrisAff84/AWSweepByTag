@@ -5,6 +5,7 @@ import botocore.exceptions
 import text_formatting as tf
 import get_other_ids
 
+
 def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> list[dict[str, str]]:
     """
     Get list of resources by common tag key and value.
@@ -30,17 +31,16 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
     resources = []
     for region in regions:
 
-        client = boto3.client('resource-groups', region_name=region)
+        client = boto3.client("resource-groups", region_name=region)
 
         query = {
             "Type": "TAG_FILTERS_1_0",
-            "Query": json.dumps({
-                "ResourceTypeFilters": ["AWS::AllSupported"],
-                "TagFilters": [{
-                    "Key": tag_key,
-                    "Values": [tag_value]
-                }]
-            })
+            "Query": json.dumps(
+                {
+                    "ResourceTypeFilters": ["AWS::AllSupported"],
+                    "TagFilters": [{"Key": tag_key, "Values": [tag_value]}],
+                }
+            ),
         }
 
         try:
@@ -49,29 +49,28 @@ def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> li
                 MaxResults=50,
             )
             while True:
-                for res in response.get('ResourceIdentifiers', []):
-                    res['Region'] = region
+                for res in response.get("ResourceIdentifiers", []):
+                    res["Region"] = region
                     resources.append(res)
 
-                next_token = response.get('NextToken')
+                next_token = response.get("NextToken")
                 if not next_token:
                     break
 
                 # Retrieve additional results if NextToken is present
-                response = client.search_resources(
-                    ResourceQuery=query,
-                    MaxResults=50,
-                    NextToken=next_token
-                )
+                response = client.search_resources(ResourceQuery=query, MaxResults=50, NextToken=next_token)
 
         except botocore.exceptions.ClientError as e:
             print()
-            error_message = e.response.get('Error', {}).get('Message', '')
+            error_message = e.response.get("Error", {}).get("Message", "")
             tf.failure_print(f"Error querying resources in region '{region}':")
             tf.indent_print(f"{e}\n", 8)
 
             if "token included in the request is invalid" in error_message:
-                tf.indent_print("The provided token is invalid. You may need to enable region '{region}' in your AWS account.\n", 8)
+                tf.indent_print(
+                    "The provided token is invalid. You may need to enable region '{region}' in your AWS account.\n",
+                    8,
+                )
 
             else:
                 tf.indent_print("Error:")
@@ -151,20 +150,22 @@ def parse_resource_by_type(resource: dict[str, str]) -> dict[str, str]:
             - region (str): Region where the resource is located.
     """
 
-    arn = resource['ResourceArn']
-    service = (resource['ResourceType'].split('::')[1]).lower()
-    resource_type = (resource['ResourceType'].split('::')[2]).lower()
-    region = resource['Region']
+    arn = resource["ResourceArn"]
+    service = (resource["ResourceType"].split("::")[1]).lower()
+    resource_type = (resource["ResourceType"].split("::")[2]).lower()
+    region = resource["Region"]
     resource_for_deletion = {
-        'resource_type': resource_type,
-        'arn': arn,
-        'service': service,
-        'region': region
+        "resource_type": resource_type,
+        "arn": arn,
+        "service": service,
+        "region": region,
     }
     return resource_for_deletion
 
 
-def order_resources_for_deletion(resources: list[dict[str, str]]) -> list[dict[str, str]]:
+def order_resources_for_deletion(
+    resources: list[dict[str, str]],
+) -> list[dict[str, str]]:
     """
     Orders resources for deletion based on their potential dependencies
 
@@ -194,28 +195,34 @@ def order_resources_for_deletion(resources: list[dict[str, str]]) -> list[dict[s
     # Additionally, resources in this group need to follow a strict internal deletion order as well
     # EC2 instance is the exception in this group since it is not a networking resource, but is shares the same service type ("ec2")
     ordered_networking_resources = [
-        r for r in resources
-        if r["service"] == "ec2" and (
-            r['resource_type'] in (
-                'eip',
+        r
+        for r in resources
+        if r["service"] == "ec2"
+        and (
+            r["resource_type"]
+            in (
+                "eip",
                 "instance",
-                'internetgateway',
-                'natgateway',
-                'routetable',
-                'subnet',
-                'transitgatewayattachment',
-                'vpcendpoint',
-                'vpc',
+                "internetgateway",
+                "natgateway",
+                "routetable",
+                "subnet",
+                "transitgatewayattachment",
+                "vpcendpoint",
+                "vpc",
             )
         )
     ]
 
     # Other resources that must follow a particlar deletion order but are not networking resources
     ordered_non_networking_resources = [
-        r for r in resources
-        if (r["service"] in (
-            "elasticloadbalancingv2",
-            "autoscaling",
+        r
+        for r in resources
+        if (
+            r["service"]
+            in (
+                "elasticloadbalancingv2",
+                "autoscaling",
             )
         )
     ]
@@ -223,18 +230,14 @@ def order_resources_for_deletion(resources: list[dict[str, str]]) -> list[dict[s
     # Resources that have a `resource_id` instead of an ARN (e.g., snapshots, AMIs)
     # May rename to snapshots_and_images in the future if these end up being the only resources with resource_id
     other_resources = [
-        r for r in resources
-        if "resource_id" in r
-        and r not in ordered_networking_resources
-        and r not in ordered_non_networking_resources
+        r for r in resources if "resource_id" in r and r not in ordered_networking_resources and r not in ordered_non_networking_resources
     ]
 
     # Remaining resources that are not part of the above groups - these (along with other_resources) can be deleted first since no other resource depends on them
     non_ordered_resources = [
-        r for r in resources
-        if r not in ordered_networking_resources
-        and r not in ordered_non_networking_resources
-        and r not in other_resources
+        r
+        for r in resources
+        if r not in ordered_networking_resources and r not in ordered_non_networking_resources and r not in other_resources
     ]
 
     ordered_resources = []
