@@ -135,7 +135,8 @@ def main():
         md.retry_failed_deletions(failed_deletions)
 
     else:
-        tf.success_print("All resources were successfully deleted.", 0)
+        print()
+        tf.success_print("All resources were successfully deleted.\n", 0)
 
 
 if __name__ == '__main__':

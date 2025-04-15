@@ -804,7 +804,7 @@ def delete_ec2_instance(arn: str, region: str, autoscaling: bool=False) -> None:
         tf.response_print(json.dumps(response, indent=4, default=str))
 
         if not autoscaling:
-            tf.indent_print(f"Waiting for EC2 instance '{instance_id}' to terminate to avoid dependency violations...")
+            tf.indent_print(f"Waiting for EC2 instance '{instance_id}' to terminate to avoid dependency violations...\n")
             ec2_waiter([instance_id], region)
             tf.success_print(f"EC2 instance '{instance_id}' has been terminated.")
             print()
