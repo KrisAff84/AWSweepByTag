@@ -1,6 +1,6 @@
 """Map services and resource types to appropriate delete function."""
 
-import delete_functions as df
+from awsweepbytag import delete_functions as df
 
 # fmt: off
 DELETE_FUNCTIONS = {

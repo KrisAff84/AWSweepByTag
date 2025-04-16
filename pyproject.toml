@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Tool for deleting AWS resources by common tag"
 authors = ["KrisAff84 <krisaff@gmail.com>"]
 readme = "README.md"
+packages = [{ include = "awsweepbytag", from = "src" }]
 
 [tool.poetry.dependencies]
 python = "^3.12"

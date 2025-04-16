@@ -2,9 +2,9 @@ import json
 
 import botocore.exceptions
 
-import get_and_order as go
-import main_delete as md
-import text_formatting as tf
+from awsweepbytag import get_and_order as go
+from awsweepbytag import main_delete as md
+from awsweepbytag import text_formatting as tf
 
 VALID_REGIONS = [
     "us-east-1",

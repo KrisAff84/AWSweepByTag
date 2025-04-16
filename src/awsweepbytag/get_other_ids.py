@@ -13,7 +13,7 @@ Functions:
 import boto3
 import botocore.exceptions
 
-import text_formatting as tf
+import awsweepbytag.text_formatting as tf
 
 
 def get_images(tag_key: str, tag_value: str, regions: list[str]) -> list[dict]:
