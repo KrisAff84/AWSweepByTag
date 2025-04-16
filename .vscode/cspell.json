@@ -12,7 +12,8 @@
             "drmap",
             "funct",
             "zstd",
-            "mypy"
+            "mypy",
+            "__pycache__"
         ],
     "languageSettings": [
         {
