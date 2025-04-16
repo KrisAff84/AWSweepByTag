@@ -58,13 +58,14 @@ Functions By Service:
         - delete_sqs_queue
 """
 
+import json
 import time
 from datetime import datetime
-import json
-import botocore.exceptions
-import boto3
-import text_formatting as tf
 
+import boto3
+import botocore.exceptions
+
+import text_formatting as tf
 
 ######################### API GW Services ###########################
 

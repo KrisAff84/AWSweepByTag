@@ -1,12 +1,14 @@
 import json
 import time
+
 import botocore.exceptions
-import text_formatting as tf
+
 import delete_resource_map as drmap
+import text_formatting as tf
 from delete_functions import (
+    delete_cloudfront_distribution,
     disable_cloudfront_distribution,
     wait_for_distribution_disabled,
-    delete_cloudfront_distribution,
 )
 
 

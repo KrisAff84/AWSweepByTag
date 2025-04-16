@@ -20,6 +20,7 @@ black = "^25.1.0"
 mypy = "^1.15.0"
 boto3-stubs = "^1.37.34"
 botocore-stubs = "^1.37.29"
+ruff = "^0.11.5"
 
 [build-system]
 requires = ["poetry-core"]
@@ -27,3 +28,11 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 140
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]

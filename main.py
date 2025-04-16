@@ -1,9 +1,10 @@
 import json
+
 import botocore.exceptions
+
 import get_and_order as go
 import main_delete as md
 import text_formatting as tf
-
 
 VALID_REGIONS = [
     "us-east-1",

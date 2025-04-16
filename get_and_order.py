@@ -1,9 +1,11 @@
 import json
 import time
+
 import boto3
 import botocore.exceptions
-import text_formatting as tf
+
 import get_other_ids
+import text_formatting as tf
 
 
 def get_resources_by_tag(tag_key: str, tag_value: str, regions: list[str]) -> list[dict[str, str]]:
