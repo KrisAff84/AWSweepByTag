@@ -65,7 +65,7 @@ from datetime import datetime
 import boto3
 import botocore.exceptions
 
-import text_formatting as tf
+from awsweepbytag import text_formatting as tf
 
 ######################### API GW Services ###########################
 

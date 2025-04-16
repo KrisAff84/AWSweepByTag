@@ -9,20 +9,20 @@ Eventually, there are plans to turn this into a CLI tool, but while it is still 
 To start the script, run:
 
 ```shell
-python main.py
+make run
 ```
 
 The script will use your default AWS credentials, but you can optionally export an AWS profile, access key and secret access key combination, or session token to use as credentials.
 
 ```shell
 export AWS_PROFILE=<profile_name>
-python main.py
+make run
 
 # or
 export AWS_ACCESS_KEY_ID=<access_key_id>
 export AWS_SECRET_ACCESS_KEY=<secret_access_key>
 export AWS_SESSION_TOKEN=<session_token>
-python main.py
+make run
 ```
 
 When the script starts you will be prompted for:
@@ -87,6 +87,6 @@ For some resources, ancillary resources are checked for and deleted as well. Vie
 
 ## Data resources
 
-- For data resources like DynamoDB, S3 and RDS, resources will be checked if is empty before deletion.
+- For data resources like DynamoDB, S3 and RDS, the resource will be checked if is empty before deletion.
 - It it is not empty you will be prompted if you really want to delete it.
-- After you have selected yes, you will be given the option to create a backup as well.
+- After you have selected yes, you will be given the option to create a backup before deletion.

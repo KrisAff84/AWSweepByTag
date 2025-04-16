@@ -3,9 +3,9 @@ import time
 
 import botocore.exceptions
 
-import delete_resource_map as drmap
-import text_formatting as tf
-from delete_functions import (
+from awsweepbytag import delete_resource_map as drmap
+from awsweepbytag import text_formatting as tf
+from awsweepbytag.delete_functions import (
     delete_cloudfront_distribution,
     disable_cloudfront_distribution,
     wait_for_distribution_disabled,
