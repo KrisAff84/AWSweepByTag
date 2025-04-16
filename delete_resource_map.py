@@ -2,7 +2,6 @@
 
 import delete_functions as df
 
-
 # fmt: off
 DELETE_FUNCTIONS = {
     "apigateway": {

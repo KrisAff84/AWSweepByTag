@@ -12,6 +12,7 @@ Functions:
 
 import boto3
 import botocore.exceptions
+
 import text_formatting as tf
 
 

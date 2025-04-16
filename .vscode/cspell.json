@@ -12,6 +12,7 @@
             "drmap",
             "funct",
             "zstd",
+            "mypy"
         ],
     "languageSettings": [
         {
