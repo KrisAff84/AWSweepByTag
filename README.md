@@ -12,7 +12,7 @@ To start the script, run:
 python main.py
 ```
 
-You script will use your default AWS credentials, but you can optionally export an AWS profile, access key and secret access key combination, or session token to use as credentials.
+The script will use your default AWS credentials, but you can optionally export an AWS profile, access key and secret access key combination, or session token to use as credentials.
 
 ```shell
 export AWS_PROFILE=<profile_name>
@@ -84,3 +84,9 @@ For some resources, ancillary resources are checked for and deleted as well. Vie
 | Subnet | Route Tables | No |
 | VPC | Security Groups | No |
 | Elastic Load Balancer | Listeners, Target Groups | Yes |
+
+## Data resources
+
+- For data resources like DynamoDB, S3 and RDS, resources will be checked if is empty before deletion.
+- It it is not empty you will be prompted if you really want to delete it.
+- After you have selected yes, you will be given the option to create a backup as well.
