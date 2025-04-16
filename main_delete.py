@@ -3,7 +3,12 @@ import time
 import botocore.exceptions
 import text_formatting as tf
 import delete_resource_map as drmap
-from delete_functions import disable_cloudfront_distribution, wait_for_distribution_disabled, delete_cloudfront_distribution
+from delete_functions import (
+    disable_cloudfront_distribution,
+    wait_for_distribution_disabled,
+    delete_cloudfront_distribution,
+)
+
 
 def delete_resource(resource: dict[str, str]) -> list[dict[str, str]] | None:
     """
@@ -38,10 +43,10 @@ def delete_resource(resource: dict[str, str]) -> list[dict[str, str]] | None:
             - ResourceNotFoundException
     """
 
-    service = resource['service']
-    resource_type = resource['resource_type']
-    arn = resource.get('arn') or resource.get('resource_id')
-    region = resource['region']
+    service = resource["service"]
+    resource_type = resource["resource_type"]
+    arn = resource.get("arn") or resource.get("resource_id")
+    region = resource["region"]
 
     # print(f"DEBUG: Checking DELETE_FUNCTIONS for service='{service}', resource_type='{resource_type}'")
 
@@ -49,36 +54,45 @@ def delete_resource(resource: dict[str, str]) -> list[dict[str, str]] | None:
     # The disable_cloudfront_distribution will attempt to delete if it is already disabled, otherwise it will return retry = True
     # which allows it to be retried later.
     if resource_type == "distribution":
-        retry = disable_cloudfront_distribution(arn)
+        retry = disable_cloudfront_distribution(arn)  # type: ignore
         if retry:
             return [resource]
         else:
             return None
 
-    if service in drmap.DELETE_FUNCTIONS and resource_type in drmap.DELETE_FUNCTIONS[service]:
+    if service in drmap.DELETE_FUNCTIONS and resource_type in drmap.DELETE_FUNCTIONS[service]:  # type: ignore
         try:
-            resources = drmap.DELETE_FUNCTIONS[service][resource_type](arn, region) # Make sure a list[dict] is returned from delete functions
+            resources = drmap.DELETE_FUNCTIONS[service][resource_type](arn, region)  # type: ignore
             if resources:
                 return resources
             else:
                 return None
 
         except botocore.exceptions.ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
+            error_code = e.response.get("Error", {}).get("Code", "")
 
             # These exceptions will not be handled by the retry function since they indicate the resource does not exist
-            if error_code in ["NotFoundException", "NoSuchEntity", "ResourceNotFoundException"]:
+            if error_code in [
+                "NotFoundException",
+                "NoSuchEntity",
+                "ResourceNotFoundException",
+            ]:
                 tf.indent_print(f"Resource '{arn}' not found. It may have already been deleted. Skipping...")
                 return None
 
             # These exceptions will be handled by the retry function
-            if error_code in ["DependencyViolation", "TooManyRequestsException", "ThrottlingException", "ServiceUnavailableException"]:
+            if error_code in [
+                "DependencyViolation",
+                "TooManyRequestsException",
+                "ThrottlingException",
+                "ServiceUnavailableException",
+            ]:
                 tf.failure_print(f"Resource '{arn}' could not be deleted due to a {error_code}. Retrying later...")
                 return [resource]  # Return to main function for retry
 
             # Unknown exceptions to be handled by retry function for good measure
             tf.failure_print(f"Resource '{arn}' could not be deleted. Error:\n")
-            error_message_lines = str(e).split(': ', 1)
+            error_message_lines = str(e).split(": ", 1)
             tf.failure_print(error_message_lines[0])
             tf.failure_print(error_message_lines[1])
             print()
@@ -89,8 +103,9 @@ def delete_resource(resource: dict[str, str]) -> list[dict[str, str]] | None:
         tf.header_print(f"No delete function found for {service}::{resource_type}. Resource must be deleted manually\n")
         return None
 
+
 # Need to print a statement when all resources have been deleted
-def retry_failed_deletions(failed_resources: list[dict[str, str]], max_retries: int=6, wait_time: int=10) -> None:
+def retry_failed_deletions(failed_resources: list[dict[str, str]], max_retries: int = 6, wait_time: int = 10) -> None:
     """
     Retries failed deletions up to max_retries times
 
@@ -121,8 +136,8 @@ def retry_failed_deletions(failed_resources: list[dict[str, str]], max_retries: 
     # Handle CloudFronts first
     for resource in cloudfront_resources:
         try:
-            wait_for_distribution_disabled(resource['arn'])
-            delete_cloudfront_distribution(resource['arn'])
+            wait_for_distribution_disabled(resource["arn"])
+            delete_cloudfront_distribution(resource["arn"])
         except Exception as e:
             tf.failure_print(f"Error deleting CloudFront distribution {resource['arn']} on retry: {str(e)}")
             other_resources.append(resource)  # Add it back for retry if it still fails
@@ -147,9 +162,12 @@ def retry_failed_deletions(failed_resources: list[dict[str, str]], max_retries: 
 
             except botocore.exceptions.ClientError as e:
                 if "DependencyViolation" in str(e):
-                    new_failed_resources.extend(resource)
+                    new_failed_resources.extend([resource])
                 else:
-                    tf.failure_print(f"Fail from retry function: Failed to delete {resource['arn']}", 0)
+                    tf.failure_print(
+                        f"Fail from retry function: Failed to delete {resource['arn']}",
+                        0,
+                    )
 
         if not new_failed_resources:
             tf.success_print("All resources were successfully deleted.", 0)
@@ -160,7 +178,10 @@ def retry_failed_deletions(failed_resources: list[dict[str, str]], max_retries: 
         time.sleep(wait_time)
 
     if other_resources:
-        tf.failure_print(f"\nFinal retry attempt reached. {len(other_resources)} resources could not be deleted.", 0)
+        tf.failure_print(
+            f"\nFinal retry attempt reached. {len(other_resources)} resources could not be deleted.",
+            0,
+        )
         print("Resources that could not be deleted:\n")
         for resource in other_resources:
             tf.response_print(json.dumps(resource, indent=4, default=str), 4)

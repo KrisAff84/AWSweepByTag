@@ -15,12 +15,13 @@ Functions:
 
 class Format:
     """Color codes to use for text formatting."""
-    end = '\033[0m'
-    blue = '\033[34m'
-    cyan = '\033[36;1m'
-    yellow = '\033[33m'
-    green = '\033[32m'
-    red = '\033[31m'
+
+    end = "\033[0m"
+    blue = "\033[34m"
+    cyan = "\033[36;1m"
+    yellow = "\033[33m"
+    green = "\033[32m"
+    red = "\033[31m"
 
 
 def header_print(text: str, indent: int = 0) -> None:
@@ -33,11 +34,11 @@ def header_print(text: str, indent: int = 0) -> None:
         text (str): Text to be formatted and printed
         indent (int, optional): Number of spaces to indent the text. Defaults to 0.
     """
-    print(Format.blue + ' ' * indent + text + Format.end)
+    print(Format.blue + " " * indent + text + Format.end)
     print()
 
 
-def subheader_print(text: str, indent: int=4) -> None:
+def subheader_print(text: str, indent: int = 4) -> None:
     """
     Format text as a subheader and print it
 
@@ -47,11 +48,11 @@ def subheader_print(text: str, indent: int=4) -> None:
         text (str): Text to be formatted and printed
         indent (int, optional): Number of spaces to indent the text. Defaults to 4.
     """
-    print(Format.cyan + ' ' * indent + text + Format.end)
+    print(Format.cyan + " " * indent + text + Format.end)
     print()
 
 
-def indent_print(text: str, indent: int=4) -> None:
+def indent_print(text: str, indent: int = 4) -> None:
     """
     Indent text and print it
 
@@ -61,10 +62,10 @@ def indent_print(text: str, indent: int=4) -> None:
         text (str): Text to be indented and printed
         indent (int, optional): Number of spaces to indent the text. Defaults to 4.
     """
-    print(' ' * indent + text)
+    print(" " * indent + text)
 
 
-def success_print(text: str, indent: int=4) -> None:
+def success_print(text: str, indent: int = 4) -> None:
     """
     Format text as a success message and print it
 
@@ -74,10 +75,10 @@ def success_print(text: str, indent: int=4) -> None:
         text (str): Text to be formatted and printed
         indent (int, optional): Number of spaces to indent the text. Defaults to 4.
     """
-    print(Format.green + ' ' * indent + text + Format.end)
+    print(Format.green + " " * indent + text + Format.end)
 
 
-def failure_print(text: str, indent: int=4) -> None:
+def failure_print(text: str, indent: int = 4) -> None:
     """
     Format text as a failure message and print it
 
@@ -87,10 +88,10 @@ def failure_print(text: str, indent: int=4) -> None:
         text (str): Text to be formatted and printed
         indent (int, optional): Number of spaces to indent the text. Defaults to 4.
     """
-    print(Format.red + ' ' * indent + text + Format.end)
+    print(Format.red + " " * indent + text + Format.end)
 
 
-def response_print(text: str, indent: int=6) -> None:
+def response_print(text: str, indent: int = 6) -> None:
     """
     Print multi-line text with each line indented
 
@@ -101,13 +102,13 @@ def response_print(text: str, indent: int=6) -> None:
         text (str): Multi-line text to be printed
         indent (int, optional): Number of spaces to indent each line. Defaults to 6.
     """
-    indent_str = ' ' * indent
+    indent_str = " " * indent
     for line in text.splitlines():
         print(indent_str + line)
     print()
 
 
-def y_n_prompt(text: str, indent: int=4) -> str:
+def y_n_prompt(text: str, indent: int = 4) -> str:
     """
     Format text as a prompt and return the user's response
 
@@ -125,7 +126,7 @@ def y_n_prompt(text: str, indent: int=4) -> str:
     return input(f"{' ' * indent}{text} (y/n): ").strip().lower()
 
 
-def custom_prompt(text: str, indent: int=4) -> str:
+def custom_prompt(text: str, indent: int = 4) -> str:
     """
     Format text as a prompt and return the user's response
 
@@ -142,7 +143,7 @@ def custom_prompt(text: str, indent: int=4) -> str:
     return input(f"{' ' * indent}{text}: ").strip()
 
 
-def warning_confirmation(text: str, indent: int=4) -> str:
+def warning_confirmation(text: str, indent: int = 4) -> str:
     """
     Format text as a warning and prompt for confirmation
 
@@ -158,6 +159,3 @@ def warning_confirmation(text: str, indent: int=4) -> str:
         str: Input from the user, stripped and lowercased.
     """
     return input(f"{Format.yellow}{' ' * indent}***** WARNING ***** : {text} (yes/no): {Format.end}").strip().lower()
-
-
-

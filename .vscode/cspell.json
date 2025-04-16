@@ -1,16 +1,33 @@
 {
-  "allowCompoundWords": true,
-  "words": [
-    "elasticloadbalancingv2",
-    "asgclient",
-    "elbv2",
-    "apigatewayv2",
-    "enis",
-    "elbs",
-    "dbinstance",
-    "drmap",
-    "funct"
+    "allowCompoundWords": true,
+        "words": [
+            "awsweepbytag",
+            "elasticloadbalancingv2",
+            "asgclient",
+            "elbv2",
+            "apigatewayv2",
+            "enis",
+            "elbs",
+            "dbinstance",
+            "drmap",
+            "funct",
+            "zstd",
+        ],
+    "languageSettings": [
+        {
+            "allowCompoundWords": true,
+            "dictionaries": [
+                "python"
+            ],
+            "languageId": "toml"
+        },
+        {
+            "dictionaries": [
+                "bash"
+            ],
+            "languageId": "*"
+        }
+    ],
 
-  ]
 
 }
