@@ -13,3 +13,6 @@ lint:
 
 run:
 	@PYTHONPATH=src python src/awsweepbytag/main.py
+
+test:
+	@poetry run pytest -W ignore::DeprecationWarning -s
