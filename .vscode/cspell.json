@@ -13,7 +13,8 @@
             "funct",
             "zstd",
             "mypy",
-            "__pycache__"
+            "__pycache__",
+            "capsys"
         ],
     "languageSettings": [
         {

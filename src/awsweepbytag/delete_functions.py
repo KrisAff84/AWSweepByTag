@@ -1015,8 +1015,13 @@ def delete_launch_template(arn: str, region: str) -> None:
             tf.failure_print(f"Launch template '{template_id}' was not successfully deleted")
         tf.response_print(json.dumps(response, indent=4, default=str))
 
-    except botocore.exceptions.ClientError:
-        raise
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "InvalidLaunchTemplateName.NotFoundException":
+            tf.success_print(f"Launch template '{template_id}' not found. It may have already been deleted.\n")
+            return None
+        else:
+            raise
 
 
 def delete_nat_gateway(arn: str, region: str) -> None:
@@ -1040,7 +1045,6 @@ def delete_nat_gateway(arn: str, region: str) -> None:
     # consider calling the waiter here if status is 'deleting'
     if deleted == "deleted" or deleted == "deleting":
         tf.success_print(f"Nat gateway '{nat_gateway_id}' was already deleted")
-        return
     try:
         response = client.delete_nat_gateway(NatGatewayId=nat_gateway_id)
         tf.indent_print(f"Nat gateway '{nat_gateway_id}' deletion initiated")
@@ -1054,7 +1058,9 @@ def delete_nat_gateway(arn: str, region: str) -> None:
         tf.response_print(json.dumps(response, indent=4, default=str))
     except Exception as e:
         tf.failure_print(f"Nat gateway '{nat_gateway_id}' was not fully deleted: {e}\n")
-        return
+        return None
+
+    return None
 
 
 def delete_route_table(arn: str, region: str) -> None:
