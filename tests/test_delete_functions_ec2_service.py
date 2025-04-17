@@ -1,3 +1,5 @@
+import json
+import logging
 from unittest.mock import patch
 
 import boto3
@@ -6,6 +8,15 @@ import pytest
 from moto import mock_aws
 
 from awsweepbytag import delete_functions
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter("[%(levelname)s] %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 
 ################################### Common Exceptions ####################################
@@ -19,7 +30,7 @@ def not_found_exception(*args, **kwargs):
 
 ################################### delete_launch_template tests ######################################
 @mock_aws
-def test_delete_launch_template_success(capsys):
+def test_delete_launch_template(capsys):
     region = "us-west-2"
     client = boto3.client("ec2", region_name=region)
 
@@ -81,5 +92,66 @@ def test_delete_launch_template_throttling(mock_boto_client, capsys):
     # Act + Assert
     with pytest.raises(botocore.exceptions.ClientError) as exc_info:
         delete_functions.delete_launch_template(arn, region)
+    output = capsys.readouterr().out
+    assert f"Deleting Launch Template '{lt_id}' in {region}..." in output
 
     assert "ThrottlingException" in str(exc_info.value)
+
+################################### deregister_ami tests ######################################
+@mock_aws
+def test_deregister_ami(capsys):
+    region = "us-east-1"
+    client = boto3.client("ec2", region_name=region)
+
+    # Create an instance
+    create_response = client.run_instances(ImageId="ami-05f417c208be02d4d", InstanceType="t2.nano", MinCount=1, MaxCount=1)
+    instance_id = create_response["Instances"][0]["InstanceId"]
+
+    # Create an AMI
+    create_response = client.create_image(Name="test-image", InstanceId=instance_id)
+    ami_id = create_response["ImageId"]
+    arn = f"arn:aws:ec2:{region}:123456789012:image/{ami_id}"
+    logger.debug(f"AMI ARN for test: {arn}")
+
+    # Confirm it exists
+    images = client.describe_images()["Images"]
+    assert any(i["ImageId"] == ami_id for i in images)
+
+    # Run delete function
+    result = delete_functions.deregister_ami(arn, region)
+    output = capsys.readouterr().out
+    assert f"AMI '{ami_id}' was successfully deregistered" in output
+    assert result is None
+
+    # Confirm it was deleted
+    images = client.describe_images()["Images"]
+    assert not any(i["ImageId"] == ami_id for i in images)
+
+################################### delete_ec2_instance tests ######################################
+@mock_aws
+def test_delete_ec2_instance(capsys):
+    region = "us-east-1"
+    client = boto3.client("ec2", region_name=region)
+
+    # Create an instance
+    create_response = client.run_instances(ImageId="ami-05f417c208be02d4d", InstanceType="t2.nano", MinCount=1, MaxCount=1)
+    instance_id = create_response["Instances"][0]["InstanceId"]
+    arn = f"arn:aws:ec2:{region}:123456789012:instance/{instance_id}"
+
+    # Confirm it exists
+    instances = client.describe_instances()["Reservations"][0]["Instances"]
+    logger.debug("Instance for test:")
+    logger.debug(json.dumps(instances, indent=2, default=str))
+    assert any(i["InstanceId"] == instance_id for i in instances)
+
+    # Run delete function
+    result = delete_functions.delete_ec2_instance(arn, region)
+    output = capsys.readouterr().out
+    assert f"EC2 instance '{instance_id}' is shutting down." in output
+    assert f"EC2 instance '{instance_id}' has been terminated." in output
+    assert result is None
+
+    # Confirm state of instance is terminated
+    instances = client.describe_instances()["Reservations"][0]["Instances"]
+    instance = next(i for i in instances if i["InstanceId"] == instance_id)
+    assert instance["State"]["Name"] == "terminated"
