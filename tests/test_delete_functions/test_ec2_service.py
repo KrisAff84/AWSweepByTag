@@ -172,6 +172,33 @@ def test_delete_ec2_instance_autoscaling_true(capsys):
     assert instance["State"]["Name"] == "terminated"
 
 
+################################### release_eip tests ######################################
+@mock_aws
+def test_release_eip(capsys):
+    region = "us-east-1"
+    client = boto3.client("ec2", region_name=region)
+
+    # Create an EIP
+    create_response = client.allocate_address(Domain="vpc")
+    eip_id = create_response["AllocationId"]
+    arn = f"arn:aws:ec2:{region}:123456789012:eip-allocation/{eip_id}"
+
+    # Confirm it exists
+    eips = client.describe_addresses()["Addresses"]
+    assert any(e["AllocationId"] == eip_id for e in eips)
+
+    # Run delete function
+    result = delete_functions.release_eip(arn, region)
+    output = capsys.readouterr().out
+    assert f"Elastic IP '{eip_id}' was successfully released" in output
+    assert result is None
+    logger.debug(output)
+
+    # Confirm it was deleted
+    eips = client.describe_addresses()["Addresses"]
+    assert not any(e["AllocationId"] == eip_id for e in eips)
+
+
 ################################### delete_launch_template tests ######################################
 @mock_aws
 def test_delete_launch_template(capsys):
