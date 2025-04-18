@@ -1077,6 +1077,8 @@ def delete_route_table(arn: str, region: str) -> None:
         tf.failure_print(f"Route table '{route_table_id}' was not successfully deleted")
     tf.response_print(json.dumps(response, indent=4, default=str))
 
+    return None
+
 
 # May need to add a step to detach from VPC to avoid dependency issues
 def delete_security_group(arn: str, region: str, vpc_funct: bool = False) -> None:
