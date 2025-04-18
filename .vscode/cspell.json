@@ -14,7 +14,8 @@
             "zstd",
             "mypy",
             "__pycache__",
-            "capsys"
+            "capsys",
+            "levelno"
         ],
     "languageSettings": [
         {
