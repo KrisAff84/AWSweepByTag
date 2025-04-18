@@ -16,3 +16,6 @@ run:
 
 test:
 	@poetry run pytest -W ignore::DeprecationWarning -s
+
+test-debug:
+	@poetry run pytest -W ignore::DeprecationWarning -srP

@@ -1,4 +1,4 @@
-import json
+# import json
 import logging
 from unittest.mock import patch
 
@@ -8,15 +8,13 @@ import pytest
 from moto import mock_aws
 
 from awsweepbytag import delete_functions
+from awsweepbytag.logger import get_colored_stream_handler
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("[%(levelname)s] %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    logger.addHandler(get_colored_stream_handler())
 
 
 ################################### Common Exceptions ####################################
@@ -31,6 +29,7 @@ def not_found_exception(*args, **kwargs):
 ################################### deregister_ami tests ######################################
 @mock_aws
 def test_deregister_ami(capsys):
+    logger.debug("Starting test_deregister_ami")
     region = "us-east-1"
     client = boto3.client("ec2", region_name=region)
 
@@ -62,18 +61,18 @@ def test_deregister_ami(capsys):
 ################################### delete_ec2_instance tests ######################################
 @mock_aws
 def test_delete_ec2_instance(capsys):
+    logger.debug("Starting test_delete_ec2_instance")
     region = "us-east-1"
     client = boto3.client("ec2", region_name=region)
 
     # Create an instance
     create_response = client.run_instances(ImageId="ami-05f417c208be02d4d", InstanceType="t2.nano", MinCount=1, MaxCount=1)
     instance_id = create_response["Instances"][0]["InstanceId"]
+    logger.debug(f"Instance ID for test: {instance_id}")
     arn = f"arn:aws:ec2:{region}:123456789012:instance/{instance_id}"
 
     # Confirm it exists
     instances = client.describe_instances()["Reservations"][0]["Instances"]
-    logger.debug("Instance for test:")
-    logger.debug(json.dumps(instances, indent=2, default=str))
     assert any(i["InstanceId"] == instance_id for i in instances)
 
     # Run delete function
@@ -94,6 +93,7 @@ def test_delete_ec2_instance(capsys):
 
 @mock_aws
 def test_delete_ec2_instance_not_found(capsys):
+    logger.debug("Starting test_delete_ec2_instance_not_found")
     # Arrange
     region = "us-east-1"
     instance_id = "i-0b3697156fd669628"
@@ -111,6 +111,7 @@ def test_delete_ec2_instance_not_found(capsys):
 @mock_aws
 @patch("boto3.client")
 def test_delete_ec2_instance_state_shutting_down(mock_boto_client, capsys):
+    logger.debug("Starting test_delete_ec2_instance_state_shutting_down")
     instance_id = "i-0b3697156fd669628"
     instance_status = "shutting-down"
     mock_client = mock_boto_client.return_value
@@ -140,18 +141,18 @@ def test_delete_ec2_instance_state_shutting_down(mock_boto_client, capsys):
 
 @mock_aws
 def test_delete_ec2_instance_autoscaling_true(capsys):
+    logger.debug("Starting test_delete_ec2_instance_autoscaling_true")
     region = "us-east-1"
     client = boto3.client("ec2", region_name=region)
 
     # Create an instance
     create_response = client.run_instances(ImageId="ami-05f417c208be02d4d", InstanceType="t2.nano", MinCount=1, MaxCount=1)
     instance_id = create_response["Instances"][0]["InstanceId"]
+    logger.debug(f"Instance ID for test: {instance_id}")
     arn = f"arn:aws:ec2:{region}:123456789012:instance/{instance_id}"
 
     # Confirm it exists
     instances = client.describe_instances()["Reservations"][0]["Instances"]
-    logger.debug("Instance for test:")
-    logger.debug(json.dumps(instances, indent=2, default=str))
     assert any(i["InstanceId"] == instance_id for i in instances)
 
     # Run delete function
@@ -175,6 +176,7 @@ def test_delete_ec2_instance_autoscaling_true(capsys):
 ################################### release_eip tests ######################################
 @mock_aws
 def test_release_eip(capsys):
+    logger.debug("Starting test_release_eip")
     region = "us-east-1"
     client = boto3.client("ec2", region_name=region)
 
@@ -192,7 +194,6 @@ def test_release_eip(capsys):
     output = capsys.readouterr().out
     assert f"Elastic IP '{eip_id}' was successfully released" in output
     assert result is None
-    logger.debug(output)
 
     # Confirm it was deleted
     eips = client.describe_addresses()["Addresses"]
@@ -202,18 +203,19 @@ def test_release_eip(capsys):
 ################################### delete_internet_gateway tests ######################################
 @mock_aws
 def test_delete_internet_gateway(capsys):
+    logger.debug("Starting test_delete_internet_gateway")
     region = "us-east-1"
     client = boto3.client("ec2", region_name=region)
 
     # Create a VPC
     vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
     vpc_id = vpc_response["Vpc"]["VpcId"]
-    logger.debug(f"VPC ID for test_delete_internet_gateway: {vpc_id}")
+    logger.debug(f"VPC ID for test: {vpc_id}")
 
     # Create an IGW
     gateway_id = client.create_internet_gateway()["InternetGateway"]["InternetGatewayId"]
     arn = f"arn:aws:ec2:{region}:123456789012:igw/{gateway_id}"
-    logger.debug(f"IGW ID for test_delete_internet_gateway: {gateway_id}")
+    logger.debug(f"IGW ID for test: {gateway_id}")
 
     # Attach IGW to VPC
     response = client.attach_internet_gateway(InternetGatewayId=gateway_id, VpcId=vpc_id)
@@ -247,6 +249,7 @@ def test_delete_internet_gateway(capsys):
 ################################### delete_launch_template tests ######################################
 @mock_aws
 def test_delete_launch_template(capsys):
+    logger.debug("Starting test_delete_launch_template")
     region = "us-west-2"
     client = boto3.client("ec2", region_name=region)
 
@@ -276,6 +279,7 @@ def test_delete_launch_template(capsys):
 
 @mock_aws
 def test_delete_launch_template_not_found(capsys):
+    logger.debug("Starting test_delete_launch_template_not_found")
     # Arrange
     region = "us-east-1"
     template_id = "lt-0abcd1234efgh5678"
@@ -297,6 +301,11 @@ def test_delete_launch_template_not_found(capsys):
 
 @patch("boto3.client")
 def test_delete_launch_template_throttling(mock_boto_client, capsys):
+    logger.debug("Starting test_delete_launch_template_throttling")
+    throttling_exception = botocore.exceptions.ClientError(
+        error_response={"Error": {"Code": "ThrottlingException", "Message": "ThrottlingException"}},
+        operation_name="DeleteLaunchTemplate",
+    )
     # Arrange
     mock_client = mock_boto_client.return_value
     mock_client.delete_launch_template.side_effect = throttling_exception
