@@ -928,14 +928,14 @@ def ec2_waiter(instance_ids: list[str], region: str) -> None:
 def release_eip(arn: str, region: str) -> None:
     """Release an elastic IP address in a given region by ARN."""
 
-    tf.header_print(f"Releasing Elastic IP '{arn}' in {region}...")
     client = boto3.client("ec2", region_name=region)
     allocation_id = arn.split("/")[-1]
+    tf.header_print(f"Releasing Elastic IP '{allocation_id}' in {region}...")
     response = client.release_address(AllocationId=allocation_id)
     if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-        tf.success_print(f"Elastic IP '{arn}' was successfully released")
+        tf.success_print(f"Elastic IP '{allocation_id}' was successfully released")
     else:
-        tf.failure_print(f"Elastic IP '{arn}' was not successfully released")
+        tf.failure_print(f"Elastic IP '{allocation_id}' was not successfully released")
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 

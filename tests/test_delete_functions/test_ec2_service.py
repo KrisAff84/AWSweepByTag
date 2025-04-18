@@ -172,6 +172,78 @@ def test_delete_ec2_instance_autoscaling_true(capsys):
     assert instance["State"]["Name"] == "terminated"
 
 
+################################### release_eip tests ######################################
+@mock_aws
+def test_release_eip(capsys):
+    region = "us-east-1"
+    client = boto3.client("ec2", region_name=region)
+
+    # Create an EIP
+    create_response = client.allocate_address(Domain="vpc")
+    eip_id = create_response["AllocationId"]
+    arn = f"arn:aws:ec2:{region}:123456789012:eip-allocation/{eip_id}"
+
+    # Confirm it exists
+    eips = client.describe_addresses()["Addresses"]
+    assert any(e["AllocationId"] == eip_id for e in eips)
+
+    # Run delete function
+    result = delete_functions.release_eip(arn, region)
+    output = capsys.readouterr().out
+    assert f"Elastic IP '{eip_id}' was successfully released" in output
+    assert result is None
+    logger.debug(output)
+
+    # Confirm it was deleted
+    eips = client.describe_addresses()["Addresses"]
+    assert not any(e["AllocationId"] == eip_id for e in eips)
+
+
+################################### delete_internet_gateway tests ######################################
+@mock_aws
+def test_delete_internet_gateway(capsys):
+    region = "us-east-1"
+    client = boto3.client("ec2", region_name=region)
+
+    # Create a VPC
+    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
+    vpc_id = vpc_response["Vpc"]["VpcId"]
+    logger.debug(f"VPC ID for test_delete_internet_gateway: {vpc_id}")
+
+    # Create an IGW
+    gateway_id = client.create_internet_gateway()["InternetGateway"]["InternetGatewayId"]
+    arn = f"arn:aws:ec2:{region}:123456789012:igw/{gateway_id}"
+    logger.debug(f"IGW ID for test_delete_internet_gateway: {gateway_id}")
+
+    # Attach IGW to VPC
+    response = client.attach_internet_gateway(InternetGatewayId=gateway_id, VpcId=vpc_id)
+    assert 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300
+
+    # Check that IGW exists and is attached to VPC
+    response = client.describe_internet_gateways(InternetGatewayIds=[gateway_id])
+    igw_attachments = response["InternetGateways"][0]["Attachments"]
+    assert any(a["VpcId"] == vpc_id for a in igw_attachments)
+    assert "available" in igw_attachments[0]["State"]
+    logger.debug(f"IGW attachments for test: {igw_attachments}")
+
+    result = delete_functions.delete_internet_gateway(arn, region)
+    output = capsys.readouterr().out
+
+    # Check expected results from delete_internet_gateway function
+    assert result is None
+    assert f"Deleting Internet Gateway '{gateway_id}' in {region}..." in output
+    assert "Checking for VPC attachments..." in output
+    assert f"Internet Gateway '{gateway_id}' was successfully detached from VPC {vpc_id}" in output
+    assert "Proceeding with deletion..." in output
+    assert f"Internet gateway '{gateway_id}' was successfully deleted" in output
+
+    # Check that IGW is deleted
+    response = client.describe_internet_gateways()
+    internet_gateways = response.get("InternetGateways", [])
+    gateway_ids = [igw["InternetGatewayId"] for igw in internet_gateways]
+    assert gateway_id not in gateway_ids
+
+
 ################################### delete_launch_template tests ######################################
 @mock_aws
 def test_delete_launch_template(capsys):
