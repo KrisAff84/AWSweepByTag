@@ -1,5 +1,6 @@
 # import json
 import logging
+import os
 from unittest.mock import patch
 
 import boto3
@@ -10,8 +11,11 @@ from moto import mock_aws
 from awsweepbytag import delete_functions
 from awsweepbytag.logger import get_colored_stream_handler
 
+log_level_str = os.getenv("LOG_LEVEL", "WARNING").upper()
+log_level = getattr(logging, log_level_str)
+
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(log_level)
 
 if not logger.handlers:
     logger.addHandler(get_colored_stream_handler())
@@ -29,7 +33,6 @@ def not_found_exception(*args, **kwargs):
 ################################### deregister_ami tests ######################################
 @mock_aws
 def test_deregister_ami(capsys):
-    logger.debug("Starting test_deregister_ami")
     region = "us-east-1"
     client = boto3.client("ec2", region_name=region)
 
@@ -61,7 +64,6 @@ def test_deregister_ami(capsys):
 ################################### delete_ec2_instance tests ######################################
 @mock_aws
 def test_delete_ec2_instance(capsys):
-    logger.debug("Starting test_delete_ec2_instance")
     region = "us-east-1"
     client = boto3.client("ec2", region_name=region)
 
@@ -93,7 +95,6 @@ def test_delete_ec2_instance(capsys):
 
 @mock_aws
 def test_delete_ec2_instance_not_found(capsys):
-    logger.debug("Starting test_delete_ec2_instance_not_found")
     # Arrange
     region = "us-east-1"
     instance_id = "i-0b3697156fd669628"
@@ -111,7 +112,6 @@ def test_delete_ec2_instance_not_found(capsys):
 @mock_aws
 @patch("boto3.client")
 def test_delete_ec2_instance_state_shutting_down(mock_boto_client, capsys):
-    logger.debug("Starting test_delete_ec2_instance_state_shutting_down")
     instance_id = "i-0b3697156fd669628"
     instance_status = "shutting-down"
     mock_client = mock_boto_client.return_value
@@ -141,7 +141,6 @@ def test_delete_ec2_instance_state_shutting_down(mock_boto_client, capsys):
 
 @mock_aws
 def test_delete_ec2_instance_autoscaling_true(capsys):
-    logger.debug("Starting test_delete_ec2_instance_autoscaling_true")
     region = "us-east-1"
     client = boto3.client("ec2", region_name=region)
 
@@ -176,7 +175,6 @@ def test_delete_ec2_instance_autoscaling_true(capsys):
 ################################### release_eip tests ######################################
 @mock_aws
 def test_release_eip(capsys):
-    logger.debug("Starting test_release_eip")
     region = "us-east-1"
     client = boto3.client("ec2", region_name=region)
 
@@ -203,7 +201,6 @@ def test_release_eip(capsys):
 ################################### delete_internet_gateway tests ######################################
 @mock_aws
 def test_delete_internet_gateway(capsys):
-    logger.debug("Starting test_delete_internet_gateway")
     region = "us-east-1"
     client = boto3.client("ec2", region_name=region)
 
@@ -249,7 +246,6 @@ def test_delete_internet_gateway(capsys):
 ################################### delete_launch_template tests ######################################
 @mock_aws
 def test_delete_launch_template(capsys):
-    logger.debug("Starting test_delete_launch_template")
     region = "us-west-2"
     client = boto3.client("ec2", region_name=region)
 
@@ -279,7 +275,6 @@ def test_delete_launch_template(capsys):
 
 @mock_aws
 def test_delete_launch_template_not_found(capsys):
-    logger.debug("Starting test_delete_launch_template_not_found")
     # Arrange
     region = "us-east-1"
     template_id = "lt-0abcd1234efgh5678"
@@ -301,7 +296,6 @@ def test_delete_launch_template_not_found(capsys):
 
 @patch("boto3.client")
 def test_delete_launch_template_throttling(mock_boto_client, capsys):
-    logger.debug("Starting test_delete_launch_template_throttling")
     throttling_exception = botocore.exceptions.ClientError(
         error_response={"Error": {"Code": "ThrottlingException", "Message": "ThrottlingException"}},
         operation_name="DeleteLaunchTemplate",

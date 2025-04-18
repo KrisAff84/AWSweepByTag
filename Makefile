@@ -15,7 +15,7 @@ run:
 	@PYTHONPATH=src python src/awsweepbytag/main.py
 
 test:
-	@poetry run pytest -W ignore::DeprecationWarning -s
-
-test-debug:
 	@poetry run pytest -W ignore::DeprecationWarning -srP
+
+test-debug: # To see all logs from tests
+	@LOG_LEVEL=DEBUG poetry run pytest -W ignore::DeprecationWarning -srP
