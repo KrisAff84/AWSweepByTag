@@ -137,6 +137,7 @@ def test_delete_ec2_instance_state_shutting_down(mock_boto_client, capsys):
     assert f"EC2 instance '{instance_id}' is shutting down." not in output
     assert result is None
 
+
 @mock_aws
 def test_delete_ec2_instance_autoscaling_true(capsys):
     region = "us-east-1"
@@ -169,6 +170,7 @@ def test_delete_ec2_instance_autoscaling_true(capsys):
     instances = client.describe_instances()["Reservations"][0]["Instances"]
     instance = next(i for i in instances if i["InstanceId"] == instance_id)
     assert instance["State"]["Name"] == "terminated"
+
 
 ################################### delete_launch_template tests ######################################
 @mock_aws
