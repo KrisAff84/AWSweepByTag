@@ -67,7 +67,9 @@ import botocore.exceptions
 
 from awsweepbytag import text_formatting as tf
 
-######################### API GW Services ###########################
+#####################################################################
+# API GW Services
+#####################################################################
 
 
 # This has been tested and works. The same logic needs to be updated for the REST API function.
@@ -351,7 +353,9 @@ def vpc_link_waiter(vpc_link_ids: list, region: str) -> None:
     print()
 
 
-################# Application Autoscaling Service ###################
+#####################################################################
+# Application Autoscaling Service
+#####################################################################
 
 
 def delete_application_autoscaling(service_namespace: str, resource_id: str, region: str) -> None:
@@ -425,7 +429,9 @@ def delete_application_autoscaling(service_namespace: str, resource_id: str, reg
         tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-####################### AutoScaling Service #########################
+#####################################################################
+# Autoscaling Service
+#####################################################################
 
 
 def delete_autoscaling_group(arn: str, region: str) -> list[dict] | None:
@@ -508,7 +514,9 @@ def delete_autoscaling_group(arn: str, region: str) -> list[dict] | None:
     return instances_to_retry
 
 
-####################### CloudFront Service ##########################
+#####################################################################
+# CloudFront Service
+#####################################################################
 
 
 def delete_cloudfront_distribution(arn: str) -> None:
@@ -619,7 +627,9 @@ def wait_for_distribution_disabled(arn: str) -> None:
     print()
 
 
-######################## DynamoDB Service ###########################
+#####################################################################
+# DynamoDB Service
+#####################################################################
 
 
 def create_dynamodb_table_backup(arn: str, region: str) -> bool:
@@ -816,7 +826,9 @@ def delete_dynamodb_table(arn: str, region: str) -> list[dict] | None:
     return None
 
 
-########################### EC2 Service #############################
+#####################################################################
+# EC2 Service
+#####################################################################
 
 
 def deregister_ami(arn: str, region: str) -> None:
@@ -1344,7 +1356,9 @@ def delete_vpc(arn: str, region: str) -> list[dict] | None:
     return None
 
 
-########################## ELBv2 Service ############################
+#####################################################################
+# ELBv2 Service
+#####################################################################
 
 
 def delete_elastic_load_balancer(arn: str, region: str) -> None:
@@ -1507,9 +1521,13 @@ def delete_target_group(arn: str, region: str) -> None:
     print()
 
 
-########################### IAM Service #############################
+#####################################################################
+# IAM Service
+#####################################################################
 
-######################### Lambda Service ############################
+#####################################################################
+# Lambda Service
+#####################################################################
 
 
 def delete_lambda_function(arn: str, region: str) -> None:
@@ -1525,7 +1543,9 @@ def delete_lambda_function(arn: str, region: str) -> None:
     print()
 
 
-########################### S3 Service ##############################
+#####################################################################
+# S3 Service
+#####################################################################
 
 
 def delete_s3_bucket(arn: str, region: str) -> None:
@@ -1598,7 +1618,9 @@ def delete_s3_bucket(arn: str, region: str) -> None:
         tf.header_print(f"Error deleting S3 bucket {bucket_name} in {region}: {e}")
 
 
-########################## SNS Service ##############################
+#####################################################################
+# SNS Service
+#####################################################################
 
 
 def delete_sns_topic(arn: str, region: str) -> None:
@@ -1627,7 +1649,9 @@ def delete_sns_topic(arn: str, region: str) -> None:
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-########################## SQS Service ##############################
+#####################################################################
+# SQS Service
+#####################################################################
 
 
 def delete_sqs_queue(arn: str, region: str) -> None:
