@@ -552,3 +552,33 @@ def test_delete_vpc_endpoint(capsys):
     vpc_endpoints = response.get("VpcEndpoints", [])
     if vpc_endpoints and vpc_endpoints[0]["VpcEndpointId"] == endpoint_id:
         assert vpc_endpoints[0]["State"] == "deleted"
+
+
+################################### delete_vpc tests ######################################
+@mock_aws
+def test_delete_vpc(capsys):
+    region = "us-east-1"
+    client = boto3.client("ec2", region_name=region)
+
+    # Create a VPC
+    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
+    vpc_id = vpc_response["Vpc"]["VpcId"]
+    arn = f"arn:aws:ec2:{region}:123456789012:vpc/{vpc_id}"
+    logger.debug(f"VPC ID for test: {vpc_id}")
+
+    # Confirm it exists
+    vpcs = client.describe_vpcs()["Vpcs"]
+    assert any(v["VpcId"] == vpc_id for v in vpcs)
+
+    # Run delete function
+    result = delete_functions.delete_vpc(arn, region)
+    output = capsys.readouterr().out
+    assert f"Deleting VPC '{vpc_id}' in {region}..." in output
+    assert f"Checking VPC '{vpc_id}' for security groups..." in output
+    assert "Deleting VPC..." in output
+    assert f"VPC '{vpc_id}' was successfully deleted" in output
+    assert result is None
+
+    # Confirm deletion
+    vpcs = client.describe_vpcs()["Vpcs"]
+    assert not any(v["VpcId"] == vpc_id for v in vpcs)
