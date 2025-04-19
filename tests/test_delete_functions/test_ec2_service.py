@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from unittest.mock import patch
@@ -445,3 +446,109 @@ def test_delete_snapshot(capsys):
     snapshots = response.get("Snapshots", [])
     snapshot_ids = [s["SnapshotId"] for s in snapshots]
     assert snapshot_id not in snapshot_ids
+
+
+################################### delete_subnet tests ######################################
+@mock_aws
+def test_delete_subnet_with_route_table_association(capsys):
+    region = "us-east-1"
+    client = boto3.client("ec2", region_name=region)
+
+    # Create a VPC
+    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
+    vpc_id = vpc_response["Vpc"]["VpcId"]
+    logger.debug(f"VPC ID for test: {vpc_id}")
+
+    # Create a subnet
+    subnet_response = client.create_subnet(VpcId=vpc_id, CidrBlock="10.0.0.0/24")
+    subnet_id = subnet_response["Subnet"]["SubnetId"]
+    arn = f"arn:aws:ec2:{region}:123456789012:subnet/{subnet_id}"
+    logger.debug(f"Subnet ID for test: {subnet_id}")
+
+    # Create a route table
+    route_table_id = client.create_route_table(VpcId=vpc_id)["RouteTable"]["RouteTableId"]
+
+    # Associate route table with subnet
+    client.associate_route_table(RouteTableId=route_table_id, SubnetId=subnet_id)
+
+    # Confirm it exists
+    subnets = client.describe_subnets()["Subnets"]
+    assert any(s["SubnetId"] == subnet_id for s in subnets)
+
+    # Confirm route table is associated with subnet
+    route_tables = client.describe_route_tables()["RouteTables"]
+    subnet_route_table_id = next(
+        (rt["RouteTableId"] for rt in route_tables for assoc in rt.get("Associations", []) if assoc.get("SubnetId") == subnet_id), None
+    )
+    assert subnet_route_table_id == route_table_id
+
+    # Run delete function
+    result = delete_functions.delete_subnet(arn, region)
+    output = capsys.readouterr().out
+    assert f"Deleting subnet '{subnet_id}' in {region}..." in output
+    assert "Looking for associated route tables..." in output
+    assert f"Route tables associated with subnet '{subnet_id}':" in output
+    assert route_table_id in output
+    assert f"Disassociating route tables from subnet '{subnet_id}'..." in output
+    assert f"Route table {route_table_id} was successfully disassociated from subnet '{subnet_id}'"
+    assert "Initiating subnet deletion..." in output
+    assert f"Subnet '{subnet_id}' was successfully deleted" in output
+    assert result is None
+
+    # Confirm deletion
+    subnets = client.describe_subnets()["Subnets"]
+    assert not any(s["SubnetId"] == subnet_id for s in subnets)
+
+
+################################### delete_vpc_endpoint tests ######################################
+@mock_aws
+def test_delete_vpc_endpoint(capsys):
+    region = "us-east-1"
+    client = boto3.client("ec2", region_name=region)
+
+    # Create a VPC
+    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
+    vpc_id = vpc_response["Vpc"]["VpcId"]
+    logger.debug(f"VPC ID for test: {vpc_id}")
+
+    # Get route table ID
+    route_table_id = client.describe_route_tables(Filters=[{"Name": "association.main", "Values": ["true"]}])["RouteTables"][0][
+        "RouteTableId"
+    ]
+    logger.debug(f"Route table ID for test: {route_table_id}")
+
+    # Create a subnet
+    subnet_response = client.create_subnet(VpcId=vpc_id, CidrBlock="10.0.0.0/24")
+    subnet_id = subnet_response["Subnet"]["SubnetId"]
+    logger.debug(f"Subnet ID for test: {subnet_id}")
+
+    # Create a VPC endpoint
+    vpc_endpoint_response = client.create_vpc_endpoint(
+        VpcId=vpc_id,
+        ServiceName="com.amazonaws.us-east-1.s3",
+        VpcEndpointType="Gateway",
+        RouteTableIds=[route_table_id],
+    )
+    endpoint_id = vpc_endpoint_response["VpcEndpoint"]["VpcEndpointId"]
+    arn = f"arn:aws:ec2:{region}:123456789012:vpc-endpoint/{endpoint_id}"
+    logger.debug(f"VPC Endpoint ID for test: {endpoint_id}")
+
+    # Confirm it exists
+    vpc_endpoints = client.describe_vpc_endpoints()["VpcEndpoints"]
+    assert any(v["VpcEndpointId"] == endpoint_id for v in vpc_endpoints)
+
+    result = delete_functions.delete_vpc_endpoint(arn, region)
+    output = capsys.readouterr().out
+
+    assert f"Deleting VPC endpoint '{endpoint_id}' in {region}..." in output
+    assert f"VPC endpoint '{endpoint_id}' was successfully deleted" in output
+    assert result is None
+
+    # Confirm deletion
+    response = client.describe_vpc_endpoints()
+    logger.debug("Describe VPC Endpoints Response:")
+    logger.debug(json.dumps(response, indent=4, default=str))
+
+    vpc_endpoints = response.get("VpcEndpoints", [])
+    if vpc_endpoints and vpc_endpoints[0]["VpcEndpointId"] == endpoint_id:
+        assert vpc_endpoints[0]["State"] == "deleted"
