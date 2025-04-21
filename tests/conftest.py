@@ -1,20 +1,20 @@
 """
-  Common configurations for tests
+Common configurations for tests
 
-  Sets up logger, fixtures, helper functions, and common exceptions that can be used across multiple test files.
+Sets up logger, fixtures, helper functions, and common exceptions that can be used across multiple test files.
 
-  Fixtures:
-    - setup
-    - vpc
-    - subnet
-    - route_table
-    - instance
+Fixtures:
+  - setup
+  - vpc
+  - subnet
+  - route_table
+  - instance
 
-  Helpers:
-    - create_arn
+Helpers:
+  - create_arn
 
-  Common Exceptions:
-    - throttling_exception
+Common Exceptions:
+  - throttling_exception
 """
 
 import logging
@@ -98,7 +98,7 @@ def instance(setup):
 
 
 ################################### Common Exceptions ####################################
-def throttling_exception(operation_name: str="GenericOperation", *args, **kwargs):
+def throttling_exception(operation_name: str = "GenericOperation", *args, **kwargs):
     raise botocore.exceptions.ClientError({"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}}, operation_name)
 
 
