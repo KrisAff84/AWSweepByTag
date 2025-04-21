@@ -1,49 +1,42 @@
+"""
+Tests for EC2 service resources in delete_functions.py
+
+The following functions are tested:
+- deregister_ami
+- delete_ec2_instance
+- release_eip
+- delete_internet_gateway
+- delete_launch_template
+- delete_nat_gateway
+- delete_network_interface
+- delete_route_table
+- delete_security_group
+- delete_snapshot
+- delete_subnet
+- delete_vpc_endpoint
+- delete_vpc
+
+"""
+
 import json
-import logging
-import os
 from unittest.mock import patch
 
-import boto3
 import botocore.exceptions
 import pytest
 from moto import mock_aws
 
-from awsweepbytag import delete_functions
-from awsweepbytag.logger import get_colored_stream_handler
-
-log_level_str = os.getenv("LOG_LEVEL", "WARNING").upper()
-log_level = getattr(logging, log_level_str)
-
-logger = logging.getLogger(__name__)
-logger.setLevel(log_level)
-
-if not logger.handlers:
-    logger.addHandler(get_colored_stream_handler())
-
-
-################################### Common Exceptions ####################################
-def throttling_exception(*args, **kwargs):
-    raise botocore.exceptions.ClientError({"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}}, "DeleteLaunchTemplate")
-
-
-def not_found_exception(*args, **kwargs):
-    raise botocore.exceptions.ClientError({"Error": {"Code": "NotFoundException", "Message": "Not found"}}, "DeleteLaunchTemplate")
+from awsweepbytag import delete_functions as df
+from tests.conftest import create_arn, logger, throttling_exception
 
 
 ################################### deregister_ami tests ######################################
-@mock_aws
-def test_deregister_ami(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
-    # Create an instance
-    create_response = client.run_instances(ImageId="ami-05f417c208be02d4d", InstanceType="t2.nano", MinCount=1, MaxCount=1)
-    instance_id = create_response["Instances"][0]["InstanceId"]
+def test_deregister_ami(capsys, instance):
+    region, client, _, instance_id = instance
 
     # Create an AMI
     create_response = client.create_image(Name="test-image", InstanceId=instance_id)
     ami_id = create_response["ImageId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:image/{ami_id}"
+    arn = create_arn("ec2", region, "image", ami_id)
     logger.debug(f"AMI ARN for test: {arn}")
 
     # Confirm it exists
@@ -51,7 +44,7 @@ def test_deregister_ami(capsys):
     assert any(i["ImageId"] == ami_id for i in images)
 
     # Run delete function
-    result = delete_functions.deregister_ami(arn, region)
+    result = df.deregister_ami(arn, region)
     output = capsys.readouterr().out
     assert f"AMI '{ami_id}' was successfully deregistered" in output
     assert result is None
@@ -62,23 +55,11 @@ def test_deregister_ami(capsys):
 
 
 ################################### delete_ec2_instance tests ######################################
-@mock_aws
-def test_delete_ec2_instance(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
-    # Create an instance
-    create_response = client.run_instances(ImageId="ami-05f417c208be02d4d", InstanceType="t2.nano", MinCount=1, MaxCount=1)
-    instance_id = create_response["Instances"][0]["InstanceId"]
-    logger.debug(f"Instance ID for test: {instance_id}")
-    arn = f"arn:aws:ec2:{region}:123456789012:instance/{instance_id}"
-
-    # Confirm it exists
-    instances = client.describe_instances()["Reservations"][0]["Instances"]
-    assert any(i["InstanceId"] == instance_id for i in instances)
+def test_delete_ec2_instance(capsys, instance):
+    region, client, arn, instance_id = instance
 
     # Run delete function
-    result = delete_functions.delete_ec2_instance(arn, region)
+    result = df.delete_ec2_instance(arn, region)
     output = capsys.readouterr().out
     assert f"EC2 instance '{instance_id}' is shutting down." in output
     assert "TerminatingInstances" in output
@@ -94,13 +75,12 @@ def test_delete_ec2_instance(capsys):
 
 
 @mock_aws
-def test_delete_ec2_instance_not_found(capsys):
-    # Arrange
-    region = "us-east-1"
+def test_delete_ec2_instance_not_found(capsys, setup):
+    region, _ = setup
     instance_id = "i-0b3697156fd669628"
-    arn = f"arn:aws:ec2:{region}:123456789012:instance/{instance_id}"
+    arn = create_arn("ec2", region, "instance", instance_id)
 
-    result = delete_functions.delete_ec2_instance(arn, region)
+    result = df.delete_ec2_instance(arn, region)
 
     # Assert correct message was printed
     output = capsys.readouterr().out
@@ -111,7 +91,9 @@ def test_delete_ec2_instance_not_found(capsys):
 
 @mock_aws
 @patch("boto3.client")
-def test_delete_ec2_instance_state_shutting_down(mock_boto_client, capsys):
+def test_delete_ec2_instance_state_shutting_down(mock_boto_client, capsys, setup):
+    # Arrange
+    region, _ = setup
     instance_id = "i-0b3697156fd669628"
     instance_status = "shutting-down"
     mock_client = mock_boto_client.return_value
@@ -128,10 +110,8 @@ def test_delete_ec2_instance_state_shutting_down(mock_boto_client, capsys):
         ]
     }
 
-    region = "us-east-1"
-    instance_id = "i-0b3697156fd669628"
-    arn = f"arn:aws:ec2:{region}:123456789012:instance/{instance_id}"
-    result = delete_functions.delete_ec2_instance(arn, region)
+    arn = create_arn("ec2", region, "instance", instance_id)
+    result = df.delete_ec2_instance(arn, region)
     output = capsys.readouterr().out
 
     assert f"Current status of EC2 instance '{instance_id}' is: '{instance_status}'. Skipping..." in output
@@ -139,23 +119,12 @@ def test_delete_ec2_instance_state_shutting_down(mock_boto_client, capsys):
     assert result is None
 
 
-@mock_aws
-def test_delete_ec2_instance_autoscaling_true(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
-    # Create an instance
-    create_response = client.run_instances(ImageId="ami-05f417c208be02d4d", InstanceType="t2.nano", MinCount=1, MaxCount=1)
-    instance_id = create_response["Instances"][0]["InstanceId"]
+def test_delete_ec2_instance_autoscaling_true(capsys, instance):
+    region, client, arn, instance_id = instance
     logger.debug(f"Instance ID for test: {instance_id}")
-    arn = f"arn:aws:ec2:{region}:123456789012:instance/{instance_id}"
-
-    # Confirm it exists
-    instances = client.describe_instances()["Reservations"][0]["Instances"]
-    assert any(i["InstanceId"] == instance_id for i in instances)
 
     # Run delete function
-    result = delete_functions.delete_ec2_instance(arn, region, True)
+    result = df.delete_ec2_instance(arn, region, True)
     output = capsys.readouterr().out
     assert f"EC2 instance '{instance_id}' is shutting down." in output
     assert "TerminatingInstances" in output
@@ -173,22 +142,19 @@ def test_delete_ec2_instance_autoscaling_true(capsys):
 
 
 ################################### release_eip tests ######################################
-@mock_aws
-def test_release_eip(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
+def test_release_eip(capsys, setup):
+    region, client = setup
     # Create an EIP
     create_response = client.allocate_address(Domain="vpc")
     eip_id = create_response["AllocationId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:eip-allocation/{eip_id}"
+    arn = create_arn("ec2", region, "eip-allocation", eip_id)
 
     # Confirm it exists
     eips = client.describe_addresses()["Addresses"]
     assert any(e["AllocationId"] == eip_id for e in eips)
 
     # Run delete function
-    result = delete_functions.release_eip(arn, region)
+    result = df.release_eip(arn, region)
     output = capsys.readouterr().out
     assert f"Elastic IP '{eip_id}' was successfully released" in output
     assert result is None
@@ -199,19 +165,13 @@ def test_release_eip(capsys):
 
 
 ################################### delete_internet_gateway tests ######################################
-@mock_aws
-def test_delete_internet_gateway(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
-    # Create a VPC
-    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
-    vpc_id = vpc_response["Vpc"]["VpcId"]
+def test_delete_internet_gateway(capsys, vpc):
+    region, client, arn, vpc_id = vpc
     logger.debug(f"VPC ID for test: {vpc_id}")
 
     # Create an IGW
     gateway_id = client.create_internet_gateway()["InternetGateway"]["InternetGatewayId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:igw/{gateway_id}"
+    arn = create_arn("ec2", region, "igw", gateway_id)
     logger.debug(f"IGW ID for test: {gateway_id}")
 
     # Attach IGW to VPC
@@ -225,7 +185,7 @@ def test_delete_internet_gateway(capsys):
     assert "available" in igw_attachments[0]["State"]
     logger.debug(f"IGW attachments for test: {igw_attachments}")
 
-    result = delete_functions.delete_internet_gateway(arn, region)
+    result = df.delete_internet_gateway(arn, region)
     output = capsys.readouterr().out
 
     # Check expected results from delete_internet_gateway function
@@ -244,25 +204,22 @@ def test_delete_internet_gateway(capsys):
 
 
 ################################### delete_launch_template tests ######################################
-@mock_aws
-def test_delete_launch_template(capsys):
-    region = "us-west-2"
-    client = boto3.client("ec2", region_name=region)
-
+def test_delete_launch_template(capsys, setup):
+    region, client = setup
     # Create a launch template
     create_response = client.create_launch_template(
         LaunchTemplateName="test-template", LaunchTemplateData={"ImageId": "ami-12345678", "InstanceType": "t2.nano"}
     )
 
     template_id = create_response["LaunchTemplate"]["LaunchTemplateId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:launch-template/{template_id}"
+    arn = create_arn("ec2", region, "launch-template", template_id)
 
     # Confirm it exists
     templates = client.describe_launch_templates()["LaunchTemplates"]
     assert any(t["LaunchTemplateId"] == template_id for t in templates)
 
     # Run delete function
-    result = delete_functions.delete_launch_template(arn, region)
+    result = df.delete_launch_template(arn, region)
     output = capsys.readouterr().out
     assert f"Launch template '{template_id}' was successfully deleted" in output
     assert result is None
@@ -273,16 +230,15 @@ def test_delete_launch_template(capsys):
     assert not any(t["LaunchTemplateId"] == template_id for t in templates)
 
 
-@mock_aws
-def test_delete_launch_template_not_found(capsys):
+def test_delete_launch_template_not_found(capsys, setup):
+    region, _ = setup
     # Arrange
-    region = "us-east-1"
     template_id = "lt-0abcd1234efgh5678"
     arn = f"arn:aws:ec2:{region}::launch-template/{template_id}"
 
     # Moto starts with no templates — deletion of this should raise ClientError with code InvalidLaunchTemplateId.NotFound
     # Act
-    result = delete_functions.delete_launch_template(arn, region)
+    result = df.delete_launch_template(arn, region)
 
     # Assert function returns None
     assert result is None
@@ -295,22 +251,19 @@ def test_delete_launch_template_not_found(capsys):
 
 
 @patch("boto3.client")
-def test_delete_launch_template_throttling(mock_boto_client, capsys):
-    throttling_exception = botocore.exceptions.ClientError(
-        error_response={"Error": {"Code": "ThrottlingException", "Message": "ThrottlingException"}},
-        operation_name="DeleteLaunchTemplate",
-    )
+def test_delete_launch_template_throttling(mock_boto_client, capsys, setup):
+    region, _ = setup
+
     # Arrange
     mock_client = mock_boto_client.return_value
-    mock_client.delete_launch_template.side_effect = throttling_exception
+    mock_client.delete_launch_template.side_effect = lambda *args, **kwargs: throttling_exception("DeleteLaunchTemplate")
 
-    region = "us-east-1"
     lt_id = "lt-0123456789abcdef0"
-    arn = f"arn:aws:ec2:us-east-1::launch-template/{lt_id}"
+    arn = create_arn("ec2", region, "launch-template", lt_id)
 
     # Act + Assert
     with pytest.raises(botocore.exceptions.ClientError) as exc_info:
-        delete_functions.delete_launch_template(arn, region)
+        df.delete_launch_template(arn, region)
     output = capsys.readouterr().out
     assert f"Deleting Launch Template '{lt_id}' in {region}..." in output
 
@@ -318,24 +271,13 @@ def test_delete_launch_template_throttling(mock_boto_client, capsys):
 
 
 ################################### delete_nat_gateway tests ######################################
-@mock_aws
-def test_delete_nat_gateway(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
-    # Create a VPC
-    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
-    vpc_id = vpc_response["Vpc"]["VpcId"]
-    logger.debug(f"VPC ID for test: {vpc_id}")
-
-    # Create a subnet
-    subnet_response = client.create_subnet(VpcId=vpc_id, CidrBlock="10.0.0.0/24")
-    subnet_id = subnet_response["Subnet"]["SubnetId"]
+def test_delete_nat_gateway(capsys, subnet):
+    region, client, _, subnet_id, _ = subnet
     logger.debug(f"Subnet ID for test: {subnet_id}")
 
     # Create a NAT gateway
     nat_gateway_id = client.create_nat_gateway(SubnetId=subnet_id)["NatGateway"]["NatGatewayId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:natgateway/{nat_gateway_id}"
+    arn = create_arn("ec2", region, "natgateway", nat_gateway_id)
     logger.debug(f"NAT Gateway ID for test: {nat_gateway_id}")
 
     # Confirm it exists
@@ -343,7 +285,7 @@ def test_delete_nat_gateway(capsys):
     assert any(n["NatGatewayId"] == nat_gateway_id for n in nat_gateways)
 
     # Run delete function
-    result = delete_functions.delete_nat_gateway(arn, region)
+    result = df.delete_nat_gateway(arn, region)
     output = capsys.readouterr().out
     assert f"Deleting Nat Gateway '{nat_gateway_id}' in {region}..." in output
     assert f"Nat gateway '{nat_gateway_id}' deletion initiated" in output
@@ -353,27 +295,12 @@ def test_delete_nat_gateway(capsys):
 
 
 ################################### delete_route_table tests ######################################
-@mock_aws
-def test_delete_route_table(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
-    # Create a VPC
-    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
-    vpc_id = vpc_response["Vpc"]["VpcId"]
-    logger.debug(f"VPC ID for test: {vpc_id}")
-
-    # Create a route table
-    route_table_id = client.create_route_table(VpcId=vpc_id)["RouteTable"]["RouteTableId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:route-table/{route_table_id}"
+def test_delete_route_table(capsys, route_table):
+    region, client, arn, route_table_id, _ = route_table
     logger.debug(f"Route table ID for test: {route_table_id}")
 
-    # Confirm it exists
-    route_tables = client.describe_route_tables()["RouteTables"]
-    assert any(r["RouteTableId"] == route_table_id for r in route_tables)
-
     # Run delete function
-    result = delete_functions.delete_route_table(arn, region)
+    result = df.delete_route_table(arn, region)
     output = capsys.readouterr().out
     assert f"Deleting route table '{route_table_id}' in {region}..." in output
     assert f"Route table '{route_table_id}' was successfully deleted" in output
@@ -385,19 +312,13 @@ def test_delete_route_table(capsys):
 
 
 ################################### delete_security_group tests ######################################
-@mock_aws
-def test_delete_security_group(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
-    # Create a VPC
-    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
-    vpc_id = vpc_response["Vpc"]["VpcId"]
+def test_delete_security_group(capsys, vpc):
+    region, client, arn, vpc_id = vpc
     logger.debug(f"VPC ID for test: {vpc_id}")
 
     # Create a security group
     sg_id = client.create_security_group(GroupName="test-group", Description="Test group")["GroupId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:security-group/{sg_id}"
+    arn = create_arn("ec2", region, "security-group", sg_id)
     logger.debug(f"Security group ID for test: {sg_id}")
 
     # Confirm it exists
@@ -405,7 +326,7 @@ def test_delete_security_group(capsys):
     assert any(g["GroupId"] == sg_id for g in groups)
 
     # Run delete function
-    result = delete_functions.delete_security_group(arn, region)
+    result = df.delete_security_group(arn, region)
     output = capsys.readouterr().out
     assert f"Deleting security group '{sg_id}' in {region}..." in output
     assert f"Security group '{sg_id}' was successfully deleted" in output
@@ -417,17 +338,15 @@ def test_delete_security_group(capsys):
 
 
 ################################### delete_snapshot tests ######################################
-@mock_aws
-def test_delete_snapshot(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
+def test_delete_snapshot(capsys, setup):
+    region, client = setup
 
     # Create a volume
     volume_id = client.create_volume(Size=1, AvailabilityZone=f"{region}a")["VolumeId"]
 
     # Create a snapshot
     snapshot_id = client.create_snapshot(VolumeId=volume_id)["SnapshotId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:snapshot/{snapshot_id}"
+    arn = create_arn("ec2", region, "snapshot", snapshot_id)
     logger.debug(f"Snapshot ID for test: {snapshot_id}")
 
     # Confirm it exists
@@ -435,7 +354,7 @@ def test_delete_snapshot(capsys):
     assert any(s["SnapshotId"] == snapshot_id for s in snapshots)
 
     # Run delete function
-    result = delete_functions.delete_snapshot(arn, region)
+    result = df.delete_snapshot(arn, region)
     output = capsys.readouterr().out
     assert f"Deleting snapshot '{snapshot_id}' in {region}..." in output
     assert f"Snapshot '{snapshot_id}' was successfully deleted" in output
@@ -449,31 +368,12 @@ def test_delete_snapshot(capsys):
 
 
 ################################### delete_subnet tests ######################################
-@mock_aws
-def test_delete_subnet_with_route_table_association(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
-    # Create a VPC
-    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
-    vpc_id = vpc_response["Vpc"]["VpcId"]
-    logger.debug(f"VPC ID for test: {vpc_id}")
-
-    # Create a subnet
-    subnet_response = client.create_subnet(VpcId=vpc_id, CidrBlock="10.0.0.0/24")
-    subnet_id = subnet_response["Subnet"]["SubnetId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:subnet/{subnet_id}"
-    logger.debug(f"Subnet ID for test: {subnet_id}")
-
-    # Create a route table
-    route_table_id = client.create_route_table(VpcId=vpc_id)["RouteTable"]["RouteTableId"]
+def test_delete_subnet_with_route_table_association(capsys, subnet, route_table):
+    region, client, arn, subnet_id, _ = subnet
+    _, _, _, route_table_id, _ = route_table
 
     # Associate route table with subnet
     client.associate_route_table(RouteTableId=route_table_id, SubnetId=subnet_id)
-
-    # Confirm it exists
-    subnets = client.describe_subnets()["Subnets"]
-    assert any(s["SubnetId"] == subnet_id for s in subnets)
 
     # Confirm route table is associated with subnet
     route_tables = client.describe_route_tables()["RouteTables"]
@@ -483,7 +383,7 @@ def test_delete_subnet_with_route_table_association(capsys):
     assert subnet_route_table_id == route_table_id
 
     # Run delete function
-    result = delete_functions.delete_subnet(arn, region)
+    result = df.delete_subnet(arn, region)
     output = capsys.readouterr().out
     assert f"Deleting subnet '{subnet_id}' in {region}..." in output
     assert "Looking for associated route tables..." in output
@@ -501,26 +401,16 @@ def test_delete_subnet_with_route_table_association(capsys):
 
 
 ################################### delete_vpc_endpoint tests ######################################
-@mock_aws
-def test_delete_vpc_endpoint(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
-    # Create a VPC
-    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
-    vpc_id = vpc_response["Vpc"]["VpcId"]
+def test_delete_vpc_endpoint(capsys, subnet):
+    region, client, _, subnet_id, vpc_id = subnet
     logger.debug(f"VPC ID for test: {vpc_id}")
+    logger.debug(f"Subnet ID for test: {subnet_id}")
 
     # Get route table ID
-    route_table_id = client.describe_route_tables(Filters=[{"Name": "association.main", "Values": ["true"]}])["RouteTables"][0][
-        "RouteTableId"
-    ]
+    route_table_id = client.describe_route_tables(
+        Filters=[{"Name": "association.main", "Values": ["true"]}, {"Name": "vpc-id", "Values": [vpc_id]}]
+    )["RouteTables"][0]["RouteTableId"]
     logger.debug(f"Route table ID for test: {route_table_id}")
-
-    # Create a subnet
-    subnet_response = client.create_subnet(VpcId=vpc_id, CidrBlock="10.0.0.0/24")
-    subnet_id = subnet_response["Subnet"]["SubnetId"]
-    logger.debug(f"Subnet ID for test: {subnet_id}")
 
     # Create a VPC endpoint
     vpc_endpoint_response = client.create_vpc_endpoint(
@@ -530,14 +420,14 @@ def test_delete_vpc_endpoint(capsys):
         RouteTableIds=[route_table_id],
     )
     endpoint_id = vpc_endpoint_response["VpcEndpoint"]["VpcEndpointId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:vpc-endpoint/{endpoint_id}"
+    arn = create_arn("ec2", region, "vpc-endpoint", endpoint_id)
     logger.debug(f"VPC Endpoint ID for test: {endpoint_id}")
 
     # Confirm it exists
     vpc_endpoints = client.describe_vpc_endpoints()["VpcEndpoints"]
     assert any(v["VpcEndpointId"] == endpoint_id for v in vpc_endpoints)
 
-    result = delete_functions.delete_vpc_endpoint(arn, region)
+    result = df.delete_vpc_endpoint(arn, region)
     output = capsys.readouterr().out
 
     assert f"Deleting VPC endpoint '{endpoint_id}' in {region}..." in output
@@ -555,15 +445,8 @@ def test_delete_vpc_endpoint(capsys):
 
 
 ################################### delete_vpc tests ######################################
-@mock_aws
-def test_delete_vpc(capsys):
-    region = "us-east-1"
-    client = boto3.client("ec2", region_name=region)
-
-    # Create a VPC
-    vpc_response = client.create_vpc(CidrBlock="10.0.0.0/16")
-    vpc_id = vpc_response["Vpc"]["VpcId"]
-    arn = f"arn:aws:ec2:{region}:123456789012:vpc/{vpc_id}"
+def test_delete_vpc(capsys, vpc):
+    region, client, arn, vpc_id = vpc
     logger.debug(f"VPC ID for test: {vpc_id}")
 
     # Confirm it exists
@@ -571,12 +454,13 @@ def test_delete_vpc(capsys):
     assert any(v["VpcId"] == vpc_id for v in vpcs)
 
     # Run delete function
-    result = delete_functions.delete_vpc(arn, region)
+    result = df.delete_vpc(arn, region)
     output = capsys.readouterr().out
     assert f"Deleting VPC '{vpc_id}' in {region}..." in output
     assert f"Checking VPC '{vpc_id}' for security groups..." in output
     assert "Deleting VPC..." in output
     assert f"VPC '{vpc_id}' was successfully deleted" in output
+    logger.debug(output)
     assert result is None
 
     # Confirm deletion
