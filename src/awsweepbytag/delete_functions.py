@@ -1355,6 +1355,66 @@ def delete_vpc(arn: str, region: str) -> list[dict] | None:
 
     return None
 
+# Currently working on this to check for dependencies if only VPC is supplied with the tag but there are other resources attached to it
+def vpc_dependency_checker(vpc_arn: str, region: str) -> list[dict]:
+    """Check for dependencies on a VPC and prompt for deletion"""
+
+    # Check for the following attached resources: route_tables, subnets, internet gateways, security groups
+    vpc_id = vpc_arn.split("/")[-1]
+    account_id = vpc_arn.split(":")[4]
+
+    client = boto3.client("ec2", region_name=region)
+    # NAT Gateway dependency check should be added to delete_subnet function
+    # Also need to check and see if these resources would still show up if it has previously been deleted by its own deletion function
+    vpc_resource_map = [
+        {
+            "method": client.describe_route_tables,
+            "filters": [{"Name": "vpc-id", "Values": [vpc_id]}],
+            "response_key": "RouteTables",
+            "id_key": "RouteTableId",
+            "resource_type": "route-table",
+        },
+        {
+            "method": client.describe_subnets,
+            "filters": [{"Name": "vpc-id", "Values": [vpc_id]}],
+            "response_key": "Subnets",
+            "id_key": "SubnetId",
+            "resource_type": "subnet",
+        },
+        {
+            "method": client.describe_internet_gateways,
+            "filters": [{"Name": "attachment.vpc-id", "Values": [vpc_id]}],
+            "response_key": "InternetGateways",
+            "id_key": "InternetGatewayId",
+            "resource_type": "internet-gateway",
+        },
+        {
+            "method": client.describe_security_groups,
+            "filters": [{"Name": "vpc-id", "Values": [vpc_id]}],
+            "response_key": "SecurityGroups",
+            "id_key": "GroupId",
+            "resource_type": "security-group",
+        },
+    ]
+
+    dependencies = []
+
+    for meta in vpc_resource_map:
+        response = meta["method"](Filters=meta["filters"])
+        for resource in response.get(meta["response_key"], []):
+            resource_id = resource.get(meta["id_key"])
+            if not resource_id:
+                continue
+            resource_type=meta["resource_type"]
+            arn = f"arn:aws:ec2:{region}:{account_id}:{resource_type}/{resource_id}"
+            dependencies.append({
+                "resource_type": meta["resource_type"].replace("-", ""),
+                "arn": arn,
+                "service": "ec2",
+                "region": region
+            })
+
+    return dependencies
 
 #####################################################################
 # ELBv2 Service
