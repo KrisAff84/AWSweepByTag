@@ -65,6 +65,7 @@ from datetime import datetime
 import boto3
 import botocore.exceptions
 
+from awsweepbytag import main_delete as md
 from awsweepbytag import text_formatting as tf
 
 #####################################################################
@@ -1291,38 +1292,40 @@ def delete_vpc(arn: str, region: str) -> list[dict] | None:
     client = boto3.client("ec2", region_name=region)
     vpc_id = arn.split("/")[-1]
     tf.header_print(f"Deleting VPC '{vpc_id}' in {region}...")
-    tf.subheader_print(f"Checking VPC '{vpc_id}' for security groups...")
+    tf.subheader_print(f"Checking VPC '{vpc_id}' for attached resources...")
 
-    response = client.describe_security_groups(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
-    security_groups = response["SecurityGroups"]
+    vpc_dependency_checker(arn, region)
 
-    security_group_retries = []
-    for sg in security_groups:
-        if sg["GroupName"] == "default":
-            continue
+    # response = client.describe_security_groups(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
+    # security_groups = response["SecurityGroups"]
 
-        sg_arn = sg.get("SecurityGroupArn")
-        if not sg_arn:
-            sg_arn = f"arn:aws:ec2:{region}:{sg['OwnerId']}:security-group/{sg['GroupId']}"
+    # security_group_retries = []
+    # for sg in security_groups:
+    #     if sg["GroupName"] == "default":
+    #         continue
 
-        try:
-            delete_security_group(sg_arn, region, True)
+    #     sg_arn = sg.get("SecurityGroupArn")
+    #     if not sg_arn:
+    #         sg_arn = f"arn:aws:ec2:{region}:{sg['OwnerId']}:security-group/{sg['GroupId']}"
 
-        except botocore.exceptions.ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "")
-            if error_code == "InvalidGroup.NotFound":
-                tf.success_print(f"Security group '{sg_arn}' already deleted.")
-                continue
-            else:
-                tf.failure_print(f"Error deleting security group '{sg_arn}': {e}")
-                security_group_retries.append(
-                    {
-                        "resource_type": "security_group",
-                        "service": "ec2",
-                        "region": region,
-                        "resource_id": sg_arn,
-                    }
-                )
+    #     try:
+    #         delete_security_group(sg_arn, region, True)
+
+    #     except botocore.exceptions.ClientError as e:
+    #         error_code = e.response.get("Error", {}).get("Code", "")
+    #         if error_code == "InvalidGroup.NotFound":
+    #             tf.success_print(f"Security group '{sg_arn}' already deleted.")
+    #             continue
+    #         else:
+    #             tf.failure_print(f"Error deleting security group '{sg_arn}': {e}")
+    #             security_group_retries.append(
+    #                 {
+    #                     "resource_type": "security_group",
+    #                     "service": "ec2",
+    #                     "region": region,
+    #                     "resource_id": sg_arn,
+    #                 }
+    #             )
 
     tf.subheader_print("Deleting VPC...")
     print()
@@ -1350,8 +1353,8 @@ def delete_vpc(arn: str, region: str) -> list[dict] | None:
     except botocore.exceptions.ClientError:
         raise
 
-    if security_group_retries:
-        return security_group_retries
+    # if security_group_retries:
+    #     return security_group_retries
 
     return None
 
@@ -1368,11 +1371,11 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> list[dict]:
     # Also need to check and see if these resources would still show up if it has previously been deleted by its own deletion function
     vpc_resource_map = [
         {
-            "method": client.describe_route_tables,
+            "method": client.describe_vpc_endpoints,
             "filters": [{"Name": "vpc-id", "Values": [vpc_id]}],
-            "response_key": "RouteTables",
-            "id_key": "RouteTableId",
-            "resource_type": "route-table",
+            "response_key": "VpcEndpoints",
+            "id_key": "VpcEndpointId",
+            "resource_type": "vpc-endpoint",
         },
         {
             "method": client.describe_subnets,
@@ -1389,11 +1392,11 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> list[dict]:
             "resource_type": "internet-gateway",
         },
         {
-            "method": client.describe_security_groups,
-            "filters": [{"Name": "vpc-id", "Values": [vpc_id]}],
-            "response_key": "SecurityGroups",
-            "id_key": "GroupId",
-            "resource_type": "security-group",
+            "method": client.describe_route_tables,
+            "filters": [{"Name": "vpc-id", "Values": [vpc_id]}, {"Name": "association.main", "Values": ["false"]}],
+            "response_key": "RouteTables",
+            "id_key": "RouteTableId",
+            "resource_type": "route-table",
         },
     ]
 
@@ -1414,7 +1417,39 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> list[dict]:
                 "region": region
             })
 
-    return dependencies
+    # Security groups handled separately since "default" needs to be filtered out of response
+    security_groups = client.describe_security_groups(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])["SecurityGroups"]
+    for sg in security_groups:
+        if sg["GroupName"] != "default":
+            resource_id = sg["GroupId"]
+            arn = f"arn:aws:ec2:{region}:{account_id}:security-group/{resource_id}"
+            dependencies.append({
+                "resource_type": "securitygroup",
+                "arn": arn,
+                "service": "ec2",
+                "region": region
+            })
+
+    tf.subheader_print(f"Found the following dependencies attached to VPC {vpc_id}")
+    for dependency in dependencies:
+        print(json.dumps(dependency, indent=4))
+
+    failed_deletions = []
+    for dependency in dependencies:
+        result = md.delete_resource(dependency)
+        if result:
+            if isinstance(result, list):
+                failed_deletions.extend(result)
+            else:
+                failed_deletions.append(result)
+
+    if failed_deletions:
+        md.retry_failed_deletions(failed_deletions)
+
+    else:
+        print()
+        tf.success_print("All dependencices were successfully deleted.\n", 0)
+
 
 #####################################################################
 # ELBv2 Service
