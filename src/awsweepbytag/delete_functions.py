@@ -1040,7 +1040,7 @@ def delete_launch_template(arn: str, region: str) -> None:
             raise
 
 
-def delete_nat_gateway(arn: str, region: str) -> None:
+def delete_nat_gateway(arn: str, region: str, dependency_checker: bool = False) -> None:
     """
     Delete a NAT gateway in a given region by ARN.
 
@@ -1055,7 +1055,10 @@ def delete_nat_gateway(arn: str, region: str) -> None:
 
     client = boto3.client("ec2", region_name=region)
     nat_gateway_id = arn.split("/")[-1]
-    tf.header_print(f"Deleting Nat Gateway '{nat_gateway_id}' in {region}...")
+    if dependency_checker:
+        tf.subheader_print(f"Deleting Nat Gateway '{nat_gateway_id}' in {region}...")
+    else:
+        tf.header_print(f"Deleting Nat Gateway '{nat_gateway_id}' in {region}...")
     deleted = client.describe_nat_gateways(NatGatewayIds=[nat_gateway_id])["NatGateways"][0]["State"]
 
     # consider calling the waiter here if status is 'deleting'
@@ -1168,9 +1171,8 @@ def delete_subnet(arn: str, region: str, dependency_checker: bool = False) -> No
     """
     Delete a subnet in a given region by ARN.
 
-    1. Checks for any route tables associations that may exist
-    2. Disassociates the subnet from any route tables if the associations exist
-    3. Deletes subnet
+    1. Calls subnet_dependency_checker to check for Route Tables and NAT Gateways
+    2. Deletes subnet
 
     Args:
         arn (str): The ARN of the subnet to delete
@@ -1185,33 +1187,7 @@ def delete_subnet(arn: str, region: str, dependency_checker: bool = False) -> No
     else:
         tf.header_print(f"Deleting subnet '{subnet_id}' in {region}...")
 
-    # Find any route tables associated with the subnet and detach them
-    tf.indent_print("Looking for associated route tables...\n")
-    route_tables = client.describe_route_tables(Filters=[{"Name": "association.subnet-id", "Values": [subnet_id]}])["RouteTables"]
-    associations = [
-        {
-            "route_table_id": rt["RouteTableId"],
-            "association_id": assoc["RouteTableAssociationId"],
-        }
-        for rt in route_tables
-        for assoc in rt.get("Associations", [])
-        if assoc.get("SubnetId") == subnet_id
-    ]
-
-    # Disassociate route tables from subnet if they are associated
-    if associations:
-        tf.indent_print(f"Route tables associated with subnet '{subnet_id}':\n")
-        for rt in associations:
-            tf.indent_print(rt["route_table_id"], indent=6)
-        print()
-        tf.indent_print(f"Disassociating route tables from subnet '{subnet_id}'...")
-        for rt in associations:
-            response = client.disassociate_route_table(AssociationId=rt["association_id"])
-            if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-                tf.success_print(f"Route table {rt['route_table_id']} was successfully disassociated from subnet '{subnet_id}'")
-            else:
-                tf.failure_print(f"Route table {rt['route_table_id']} was not successfully disassociated from subnet '{subnet_id}'")
-            tf.response_print(json.dumps(response, indent=4, default=str))
+    subnet_dependency_checker(arn, region)
 
     # # Check for any ENIs in the subnet
     # enis = client.describe_network_interfaces(Filters=[{'Name': 'subnet-id', 'Values': [subnet_id]}])['NetworkInterfaces']
@@ -1306,7 +1282,6 @@ def delete_vpc(arn: str, region: str) -> None:
     client = boto3.client("ec2", region_name=region)
     vpc_id = arn.split("/")[-1]
     tf.header_print(f"Deleting VPC '{vpc_id}' in {region}...")
-    tf.subheader_print(f"Checking VPC '{vpc_id}' for attached resources...")
 
     skip = vpc_dependency_checker(arn, region)
 
@@ -1341,12 +1316,108 @@ def delete_vpc(arn: str, region: str) -> None:
     return None
 
 
-# Currently working on this to check for dependencies if only VPC is supplied with the tag but there are other resources attached to it
-def vpc_dependency_checker(vpc_arn: str, region: str) -> bool:
-    """Check for dependencies on a VPC and prompt for deletion"""
+def subnet_dependency_checker(subnet_arn: str, region: str) -> None:
+    """
+    Checks for subnet dependencies.
 
+    1. Checks for any route tables associated with subnet
+    2. Disassociates route tables if they exist
+    3. Checks for any NAT Gateways in subnet
+    4. Deletes NAT Gateways if they exist
+
+    Args:
+        subnet_id (str): The ID of the subnet to check for dependencies
+        region (str): The region the subnet is in
+
+    """
+    subnet_id = subnet_arn.split("/")[-1]
+    account_id = subnet_arn.split(":")[4]
+
+    client = boto3.client("ec2", region_name=region)
+    tf.subheader_print(f"Checking for resources attached to subnet '{subnet_id}'...")
+
+    # Find any route tables associated with the subnet and detach them
+    tf.indent_print("Looking for associated route tables...\n")
+    route_tables = client.describe_route_tables(Filters=[{"Name": "association.subnet-id", "Values": [subnet_id]}])["RouteTables"]
+    associations = [
+        {
+            "route_table_id": rt["RouteTableId"],
+            "association_id": assoc["RouteTableAssociationId"],
+        }
+        for rt in route_tables
+        for assoc in rt.get("Associations", [])
+        if assoc.get("SubnetId") == subnet_id
+    ]
+
+    # Disassociate route tables from subnet if they are associated
+    if associations:
+        tf.indent_print(f"Route tables associated with subnet '{subnet_id}':\n")
+        for rt in associations:
+            tf.indent_print(rt["route_table_id"], indent=6)
+        print()
+        tf.indent_print(f"Disassociating route tables from subnet '{subnet_id}'...\n")
+        for rt in associations:
+            response = client.disassociate_route_table(AssociationId=rt["association_id"])
+            if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
+                tf.success_print(f"Route table {rt['route_table_id']} was successfully disassociated from subnet '{subnet_id}'")
+            else:
+                tf.failure_print(f"Route table {rt['route_table_id']} was not successfully disassociated from subnet '{subnet_id}'")
+            tf.response_print(json.dumps(response, indent=4, default=str))
+
+    # Check for NAT Gateways
+    tf.indent_print("Checking for NAT Gateways...\n")
+    nat_gateways = client.describe_nat_gateways(Filters=[{"Name": "subnet-id", "Values": [subnet_id]}])["NatGateways"]
+    nat_gateway_ids = [ng["NatGatewayId"] for ng in nat_gateways]
+
+    if len(nat_gateways) == 0:
+        tf.indent_print(f"No NAT Gateways found in subnet '{subnet_id}'.\n")
+        return
+
+    attached_nats = []
+    tf.indent_print(f"NAT Gateways in subnet '{subnet_id}':\n")
+    for ng in nat_gateway_ids:
+        nat_arn = f"arn:aws:ec2:{region}:{account_id}:nat-gateway/{ng}"
+        tf.indent_print(ng, indent=6)
+        attached_nats.append({"resource_type": "natgateway", "arn": nat_arn, "service": "ec2", "region": region})
+    print()
+
+    failed_deletions = []
+    for nat in attached_nats:
+        result = md.delete_resource(nat, True)
+        if result:
+            if isinstance(result, list):
+                failed_deletions.extend(result)
+            else:
+                failed_deletions.append(result)
+
+    if failed_deletions:
+        md.retry_failed_deletions(failed_deletions)
+
+    return
+
+
+def vpc_dependency_checker(vpc_arn: str, region: str) -> bool:
+    """
+    Check a VPC for dependencies and prompts for deletion.
+
+    1. Checks the VPC for the following dependencies that would prevent VPC deletion:
+        - VPC Endpoints
+        - Subnets
+        - Internet Gateways
+        - Route Tables
+        - Security Groups
+    2. Prompts for deletion of all dependencies (and VPC)
+    3. If deletion is confirmed, deletes all dependencies and returns False (whether to skip VPC deletion) to delete_vpc
+    4. If deletion is not confirmed, returns True to skip VPC deletion
+
+    Returns:
+       bool: Whether to skip VPC deletion (True = skip, False = do not skip)
+
+    """
     vpc_id = vpc_arn.split("/")[-1]
     account_id = vpc_arn.split(":")[4]
+
+    tf.subheader_print(f"Checking VPC '{vpc_id}' for attached resources...")
 
     client = boto3.client("ec2", region_name=region)
 
@@ -1386,6 +1457,7 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> bool:
 
     dependencies = []
 
+    # Collects attached vpc_endpoints, subnets, internet_gateways, route_tables
     for meta in vpc_resource_map:
         response = meta["method"](Filters=meta["filters"])
         for resource in response.get(meta["response_key"], []):
@@ -1413,6 +1485,7 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> bool:
 
     print()
     delete = tf.y_n_prompt("If you continue all dependencies will be deleted as well. Continue?")
+    print()
 
     if delete != "y":
         print()
@@ -1433,7 +1506,7 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> bool:
 
     else:
         print()
-        tf.success_print("All dependencices were successfully deleted.\n")
+        tf.success_print("All VPC dependencices were successfully deleted.\n")
 
     return False
 
