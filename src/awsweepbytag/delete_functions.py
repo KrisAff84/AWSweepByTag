@@ -952,7 +952,7 @@ def release_eip(arn: str, region: str) -> None:
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-def delete_internet_gateway(arn: str, region: str, dependency_checker: bool=False) -> None:
+def delete_internet_gateway(arn: str, region: str, dependency_checker: bool = False) -> None:
     """
     Delete an internet gateway in a given region by ARN.
 
@@ -1100,7 +1100,7 @@ def delete_route_table(arn: str, region: str, dependency_checker=False) -> None:
 
 
 # May need to add a step to detach from VPC to avoid dependency issues
-def delete_security_group(arn: str, region: str, dependency_checker: bool=False) -> None:
+def delete_security_group(arn: str, region: str, dependency_checker: bool = False) -> None:
     """
     Delete a security group in a given region by ARN
 
@@ -1164,7 +1164,7 @@ def delete_snapshot(arn: str, region: str) -> None:
 
 
 # TODO: Add a check for hanging ENIs
-def delete_subnet(arn: str, region: str, dependency_checker: bool=False) -> None:
+def delete_subnet(arn: str, region: str, dependency_checker: bool = False) -> None:
     """
     Delete a subnet in a given region by ARN.
 
@@ -1239,7 +1239,7 @@ def delete_subnet(arn: str, region: str, dependency_checker: bool=False) -> None
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-def delete_vpc_endpoint(arn: str, region: str, dependency_checker: bool=False) -> None:
+def delete_vpc_endpoint(arn: str, region: str, dependency_checker: bool = False) -> None:
     """
     Delete a VPC endpoint in a given region by ARN
 
@@ -1340,8 +1340,9 @@ def delete_vpc(arn: str, region: str) -> None:
 
     return None
 
+
 # Currently working on this to check for dependencies if only VPC is supplied with the tag but there are other resources attached to it
-def vpc_dependency_checker(vpc_arn: str, region: str) -> None:
+def vpc_dependency_checker(vpc_arn: str, region: str) -> bool:
     """Check for dependencies on a VPC and prompt for deletion"""
 
     vpc_id = vpc_arn.split("/")[-1]
@@ -1391,14 +1392,9 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> None:
             resource_id = resource.get(meta["id_key"])
             if not resource_id:
                 continue
-            resource_type=meta["resource_type"]
+            resource_type = meta["resource_type"]
             arn = f"arn:aws:ec2:{region}:{account_id}:{resource_type}/{resource_id}"
-            dependencies.append({
-                "resource_type": meta["resource_type"].replace("-", ""),
-                "arn": arn,
-                "service": "ec2",
-                "region": region
-            })
+            dependencies.append({"resource_type": meta["resource_type"].replace("-", ""), "arn": arn, "service": "ec2", "region": region})
 
     # Security groups handled separately since "default" needs to be filtered out of response
     security_groups = client.describe_security_groups(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])["SecurityGroups"]
@@ -1406,14 +1402,12 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> None:
         if sg["GroupName"] != "default":
             resource_id = sg["GroupId"]
             arn = f"arn:aws:ec2:{region}:{account_id}:security-group/{resource_id}"
-            dependencies.append({
-                "resource_type": "securitygroup",
-                "arn": arn,
-                "service": "ec2",
-                "region": region
-            })
+            dependencies.append({"resource_type": "securitygroup", "arn": arn, "service": "ec2", "region": region})
+    if len(dependencies) == 0:
+        tf.indent_print(f"No dependencies found for VPC '{vpc_id}\n")
+        return False
 
-    tf.subheader_print(f"Found the following dependencies attached to VPC {vpc_id}")
+    tf.subheader_print(f"Found the following dependencies attached to VPC '{vpc_id}'")
     for dependency in dependencies:
         print(json.dumps(dependency, indent=4))
 
@@ -1440,6 +1434,8 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> None:
     else:
         print()
         tf.success_print("All dependencices were successfully deleted.\n")
+
+    return False
 
 
 #####################################################################
