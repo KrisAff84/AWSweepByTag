@@ -756,7 +756,7 @@ def delete_dynamodb_table(arn: str, region: str) -> list[dict] | None:
     if deletion_protection:
         disable_protection = tf.warning_confirmation(f"Table '{table_name}' has deletion protection enabled. Disable it?")
         if disable_protection != "yes":
-            tf.indent_print(f"Skipping deletion of DynamoDB table '{table_name}'")
+            tf.indent_print(f"Skipping deletion of DynamoDB table '{table_name}'...\n")
             return None
 
         # Disable deletion protection
@@ -770,7 +770,7 @@ def delete_dynamodb_table(arn: str, region: str) -> list[dict] | None:
         confirm = tf.warning_confirmation(f"Table '{table_name}' is not empty. Delete all items and the table?")
         print()
         if confirm != "yes":
-            tf.indent_print(f"Skipping deletion of DynamoDB table '{table_name}'")
+            tf.indent_print(f"Skipping deletion of DynamoDB table '{table_name}'...\n")
             return None
 
         # Prompt and create backup if table is not empty
@@ -781,7 +781,7 @@ def delete_dynamodb_table(arn: str, region: str) -> list[dict] | None:
             delete = tf.warning_confirmation(f"Backup of table '{table_name}' could not be created. Do you still want to delete the table?")
 
             if delete != "yes":
-                tf.indent_print(f"Skipping deletion of DynamoDB table '{table_name}'...")
+                tf.indent_print(f"Skipping deletion of DynamoDB table '{table_name}'...\n")
                 return None
 
     # Delete the table
@@ -952,7 +952,7 @@ def release_eip(arn: str, region: str) -> None:
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-def delete_internet_gateway(arn: str, region: str) -> None:
+def delete_internet_gateway(arn: str, region: str, dependency_checker: bool=False) -> None:
     """
     Delete an internet gateway in a given region by ARN.
 
@@ -966,7 +966,10 @@ def delete_internet_gateway(arn: str, region: str) -> None:
 
     client = boto3.client("ec2", region_name=region)
     gateway_id = arn.split("/")[-1]
-    tf.header_print(f"Deleting Internet Gateway '{gateway_id}' in {region}...")
+    if dependency_checker:
+        tf.subheader_print(f"Deleting Internet Gateway '{gateway_id}' in {region}...")
+    else:
+        tf.header_print(f"Deleting Internet Gateway '{gateway_id}' in {region}...")
 
     # Detach Internet Gateway if it is attached to a VPC
     tf.subheader_print("Checking for VPC attachments...")
@@ -1076,12 +1079,15 @@ def delete_nat_gateway(arn: str, region: str) -> None:
     return None
 
 
-def delete_route_table(arn: str, region: str) -> None:
+def delete_route_table(arn: str, region: str, dependency_checker=False) -> None:
     """Delete a route table in a given region by ARN."""
 
     client = boto3.client("ec2", region_name=region)
     route_table_id = arn.split("/")[-1]
-    tf.header_print(f"Deleting route table '{route_table_id}' in {region}...")
+    if dependency_checker:
+        tf.subheader_print(f"Deleting route table '{route_table_id}' in {region}...")
+    else:
+        tf.header_print(f"Deleting route table '{route_table_id}' in {region}...")
 
     response = client.delete_route_table(RouteTableId=route_table_id)
     if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
@@ -1094,14 +1100,14 @@ def delete_route_table(arn: str, region: str) -> None:
 
 
 # May need to add a step to detach from VPC to avoid dependency issues
-def delete_security_group(arn: str, region: str, vpc_funct: bool = False) -> None:
+def delete_security_group(arn: str, region: str, dependency_checker: bool=False) -> None:
     """
     Delete a security group in a given region by ARN
 
     Args:
         arn (str): The ARN of the security group to delete
         region (str): The region the security group is in
-        vpc_funct: (bool, optional): Whether or not the function was called by delete_vpc. Defaults to False.
+        dependency_checker: (bool, optional): Whether or not the function was called by delete_vpc. Defaults to False.
 
     Returns:
         None
@@ -1113,7 +1119,7 @@ def delete_security_group(arn: str, region: str, vpc_funct: bool = False) -> Non
     client = boto3.client("ec2", region_name=region)
     sg_id = arn.split("/")[-1]
 
-    if vpc_funct:
+    if dependency_checker:
         tf.subheader_print(f"Deleting security group '{sg_id}' in {region}...")
     else:
         tf.header_print(f"Deleting security group '{sg_id}' in {region}...")
@@ -1158,7 +1164,7 @@ def delete_snapshot(arn: str, region: str) -> None:
 
 
 # TODO: Add a check for hanging ENIs
-def delete_subnet(arn: str, region: str) -> None:
+def delete_subnet(arn: str, region: str, dependency_checker: bool=False) -> None:
     """
     Delete a subnet in a given region by ARN.
 
@@ -1174,7 +1180,10 @@ def delete_subnet(arn: str, region: str) -> None:
     client = boto3.client("ec2", region_name=region)
     subnet_id = arn.split("/")[-1]
 
-    tf.header_print(f"Deleting subnet '{subnet_id}' in {region}...")
+    if dependency_checker:
+        tf.subheader_print(f"Deleting subnet '{subnet_id}' in {region}...")
+    else:
+        tf.header_print(f"Deleting subnet '{subnet_id}' in {region}...")
 
     # Find any route tables associated with the subnet and detach them
     tf.indent_print("Looking for associated route tables...\n")
@@ -1230,7 +1239,7 @@ def delete_subnet(arn: str, region: str) -> None:
     tf.response_print(json.dumps(response, indent=4, default=str))
 
 
-def delete_vpc_endpoint(arn: str, region: str) -> None:
+def delete_vpc_endpoint(arn: str, region: str, dependency_checker: bool=False) -> None:
     """
     Delete a VPC endpoint in a given region by ARN
 
@@ -1244,7 +1253,12 @@ def delete_vpc_endpoint(arn: str, region: str) -> None:
 
     client = boto3.client("ec2", region_name=region)
     endpoint_id = arn.split("/")[-1]
-    tf.header_print(f"Deleting VPC endpoint '{endpoint_id}' in {region}...")
+
+    if dependency_checker:
+        tf.subheader_print(f"Deleting VPC endpoint '{endpoint_id}' in {region}...")
+
+    else:
+        tf.header_print(f"Deleting VPC endpoint '{endpoint_id}' in {region}...")
     try:
         response = client.delete_vpc_endpoints(VpcEndpointIds=[endpoint_id])
 
@@ -1274,7 +1288,7 @@ def delete_vpc_endpoint(arn: str, region: str) -> None:
         return None
 
 
-def delete_vpc(arn: str, region: str) -> list[dict] | None:
+def delete_vpc(arn: str, region: str) -> None:
     """
     Deletes a VPC and all of its security groups in a given region by ARN
 
@@ -1294,41 +1308,12 @@ def delete_vpc(arn: str, region: str) -> list[dict] | None:
     tf.header_print(f"Deleting VPC '{vpc_id}' in {region}...")
     tf.subheader_print(f"Checking VPC '{vpc_id}' for attached resources...")
 
-    vpc_dependency_checker(arn, region)
+    skip = vpc_dependency_checker(arn, region)
 
-    # response = client.describe_security_groups(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
-    # security_groups = response["SecurityGroups"]
-
-    # security_group_retries = []
-    # for sg in security_groups:
-    #     if sg["GroupName"] == "default":
-    #         continue
-
-    #     sg_arn = sg.get("SecurityGroupArn")
-    #     if not sg_arn:
-    #         sg_arn = f"arn:aws:ec2:{region}:{sg['OwnerId']}:security-group/{sg['GroupId']}"
-
-    #     try:
-    #         delete_security_group(sg_arn, region, True)
-
-    #     except botocore.exceptions.ClientError as e:
-    #         error_code = e.response.get("Error", {}).get("Code", "")
-    #         if error_code == "InvalidGroup.NotFound":
-    #             tf.success_print(f"Security group '{sg_arn}' already deleted.")
-    #             continue
-    #         else:
-    #             tf.failure_print(f"Error deleting security group '{sg_arn}': {e}")
-    #             security_group_retries.append(
-    #                 {
-    #                     "resource_type": "security_group",
-    #                     "service": "ec2",
-    #                     "region": region,
-    #                     "resource_id": sg_arn,
-    #                 }
-    #             )
+    if skip:
+        return None
 
     tf.subheader_print("Deleting VPC...")
-    print()
     try:
         response = client.delete_vpc(VpcId=vpc_id)
         status_code = response["ResponseMetadata"]["HTTPStatusCode"]
@@ -1353,20 +1338,18 @@ def delete_vpc(arn: str, region: str) -> list[dict] | None:
     except botocore.exceptions.ClientError:
         raise
 
-    # if security_group_retries:
-    #     return security_group_retries
-
     return None
 
 # Currently working on this to check for dependencies if only VPC is supplied with the tag but there are other resources attached to it
-def vpc_dependency_checker(vpc_arn: str, region: str) -> list[dict]:
+def vpc_dependency_checker(vpc_arn: str, region: str) -> None:
     """Check for dependencies on a VPC and prompt for deletion"""
 
-    # Check for the following attached resources: route_tables, subnets, internet gateways, security groups
     vpc_id = vpc_arn.split("/")[-1]
     account_id = vpc_arn.split(":")[4]
 
     client = boto3.client("ec2", region_name=region)
+
+    # Check for the following attached resources: vpc_endpoints, subnets, internet gateways, route_tables, security_groups
     # NAT Gateway dependency check should be added to delete_subnet function
     # Also need to check and see if these resources would still show up if it has previously been deleted by its own deletion function
     vpc_resource_map = [
@@ -1434,9 +1417,17 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> list[dict]:
     for dependency in dependencies:
         print(json.dumps(dependency, indent=4))
 
+    print()
+    delete = tf.y_n_prompt("If you continue all dependencies will be deleted as well. Continue?")
+
+    if delete != "y":
+        print()
+        tf.indent_print(f"Skipping deletion of VPC '{vpc_id}' and its dependencies...\n")
+        return True
+
     failed_deletions = []
     for dependency in dependencies:
-        result = md.delete_resource(dependency)
+        result = md.delete_resource(dependency, True)
         if result:
             if isinstance(result, list):
                 failed_deletions.extend(result)
@@ -1448,7 +1439,7 @@ def vpc_dependency_checker(vpc_arn: str, region: str) -> list[dict]:
 
     else:
         print()
-        tf.success_print("All dependencices were successfully deleted.\n", 0)
+        tf.success_print("All dependencices were successfully deleted.\n")
 
 
 #####################################################################
