@@ -139,8 +139,8 @@ def subnet_dependency_checker(subnet_arn: str, region: str) -> tuple[list[dict],
             tf.indent_print(f"Skipping deletion of subnet '{subnet_id}' and its Lambda dependencies...\n")
             return [], True
 
-        # Add Lambda dependencies to the main dependencies list
-        dependencies.extend(lambda_dependencies)
+    # Add Lambda dependencies to the main dependencies list
+    dependencies.extend(lambda_dependencies)
 
     if len(dependencies) == 0:
         tf.indent_print(f"No dependencies found in subnet '{subnet_id}'.\n")
@@ -151,6 +151,8 @@ def subnet_dependency_checker(subnet_arn: str, region: str) -> tuple[list[dict],
         print()
 
     return dependencies, False
+
+
 
 
 
