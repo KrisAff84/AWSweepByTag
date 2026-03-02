@@ -1,4 +1,5 @@
 **__pycache__
+.kiro
 .mypy_cache/
 .ruff_cache/
 .venv/

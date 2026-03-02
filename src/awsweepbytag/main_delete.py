@@ -1,3 +1,4 @@
+import inspect
 import json
 import time
 
@@ -12,7 +13,7 @@ from awsweepbytag.delete_functions import (
 )
 
 
-def delete_resource(resource: dict[str, str]) -> list[dict[str, str]] | None:
+def delete_resource(resource: dict[str, str], dependency_checker: bool = False) -> list[dict[str, str]] | None:
     """
     Finds and calls the appropriate delete function based on the resource type
 
@@ -63,8 +64,14 @@ def delete_resource(resource: dict[str, str]) -> list[dict[str, str]] | None:
             return None
 
     if service in drmap.DELETE_FUNCTIONS and resource_type in drmap.DELETE_FUNCTIONS[service]:  # type: ignore
+
+        delete_fn = drmap.DELETE_FUNCTIONS[service][resource_type]  # type: ignore
+        fn_signature = inspect.signature(delete_fn)
         try:
-            resources = drmap.DELETE_FUNCTIONS[service][resource_type](arn, region)  # type: ignore
+            if "dependency_checker" in fn_signature.parameters:
+                resources = drmap.DELETE_FUNCTIONS[service][resource_type](arn, region, dependency_checker)  # type: ignore
+            else:
+                resources = drmap.DELETE_FUNCTIONS[service][resource_type](arn, region)  # type: ignore
             if resources:
                 return resources
             else:
