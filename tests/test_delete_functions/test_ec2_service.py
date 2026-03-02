@@ -21,6 +21,7 @@ The following functions are tested:
 import json
 from unittest.mock import patch
 
+import boto3
 import botocore.exceptions
 import pytest
 from moto import mock_aws
@@ -391,6 +392,175 @@ def test_delete_subnet_with_route_table_association(capsys, subnet, route_table)
     assert route_table_id in output
     assert f"Disassociating route tables from subnet '{subnet_id}'..." in output
     assert f"Route table {route_table_id} was successfully disassociated from subnet '{subnet_id}'"
+    assert "Checking for NAT Gateways, EC2 instances, and Lambda functions..." in output
+    assert "Initiating subnet deletion..." in output
+    assert f"Subnet '{subnet_id}' was successfully deleted" in output
+    assert result is None
+
+    # Confirm deletion
+    subnets = client.describe_subnets()["Subnets"]
+    assert not any(s["SubnetId"] == subnet_id for s in subnets)
+
+
+def test_delete_subnet_with_lambda_function(capsys, subnet):
+    region, client, arn, subnet_id, vpc_id = subnet
+    logger.debug(f"Subnet ID for test: {subnet_id}")
+    logger.debug(f"VPC ID for test: {vpc_id}")
+
+    # Create IAM role for Lambda
+    iam_client = boto3.client("iam", region_name=region)
+    role_name = "test-lambda-role"
+    assume_role_policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"Service": "lambda.amazonaws.com"},
+                "Action": "sts:AssumeRole",
+            }
+        ],
+    }
+    iam_client.create_role(RoleName=role_name, AssumeRolePolicyDocument=json.dumps(assume_role_policy))
+    role_arn = f"arn:aws:iam::123456789012:role/{role_name}"
+
+    # Create a Lambda function attached to the subnet
+    lambda_client = boto3.client("lambda", region_name=region)
+    function_name = "test-function"
+
+    # Create security group for Lambda
+    sg_id = client.create_security_group(GroupName="lambda-sg", Description="Lambda security group", VpcId=vpc_id)["GroupId"]
+
+    lambda_client.create_function(
+        FunctionName=function_name,
+        Runtime="python3.12",
+        Role=role_arn,
+        Handler="index.handler",
+        Code={"ZipFile": b"fake code"},
+        VpcConfig={
+            "SubnetIds": [subnet_id],
+            "SecurityGroupIds": [sg_id],
+        },
+    )
+
+    # Confirm Lambda function exists and is attached to subnet
+    functions = lambda_client.list_functions()["Functions"]
+    test_function = next((f for f in functions if f["FunctionName"] == function_name), None)
+    assert test_function is not None
+    assert subnet_id in test_function["VpcConfig"]["SubnetIds"]
+
+    # Run delete function
+    result = df.delete_subnet(arn, region)
+    output = capsys.readouterr().out
+
+    assert f"Deleting subnet '{subnet_id}' in {region}..." in output
+    assert "Checking for NAT Gateways, EC2 instances, and Lambda functions..." in output
+    assert "Found 1 resource(s) in subnet" in output
+    assert "function:" in output
+    assert function_name in output
+    assert f"Deleting Lambda function" in output
+    assert f"Lambda function" in output and "was successfully deleted" in output
+    assert "Initiating subnet deletion..." in output
+    assert f"Subnet '{subnet_id}' was successfully deleted" in output
+    assert result is None
+
+    # Confirm Lambda function was deleted
+    functions = lambda_client.list_functions()["Functions"]
+    assert not any(f["FunctionName"] == function_name for f in functions)
+
+    # Confirm subnet was deleted
+    subnets = client.describe_subnets()["Subnets"]
+    assert not any(s["SubnetId"] == subnet_id for s in subnets)
+
+
+def test_delete_subnet_with_nat_gateway_and_lambda(capsys, subnet):
+    region, client, arn, subnet_id, vpc_id = subnet
+    logger.debug(f"Subnet ID for test: {subnet_id}")
+    logger.debug(f"VPC ID for test: {vpc_id}")
+
+    # Create IAM role for Lambda
+    iam_client = boto3.client("iam", region_name=region)
+    role_name = "test-lambda-role-2"
+    assume_role_policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"Service": "lambda.amazonaws.com"},
+                "Action": "sts:AssumeRole",
+            }
+        ],
+    }
+    iam_client.create_role(RoleName=role_name, AssumeRolePolicyDocument=json.dumps(assume_role_policy))
+    role_arn = f"arn:aws:iam::123456789012:role/{role_name}"
+
+    # Create a NAT Gateway in the subnet
+    nat_gateway_id = client.create_nat_gateway(SubnetId=subnet_id)["NatGateway"]["NatGatewayId"]
+    logger.debug(f"NAT Gateway ID for test: {nat_gateway_id}")
+
+    # Create a Lambda function attached to the subnet
+    lambda_client = boto3.client("lambda", region_name=region)
+    function_name = "test-function-with-nat"
+
+    # Create security group for Lambda
+    sg_id = client.create_security_group(GroupName="lambda-sg-2", Description="Lambda security group", VpcId=vpc_id)["GroupId"]
+
+    lambda_client.create_function(
+        FunctionName=function_name,
+        Runtime="python3.12",
+        Role=role_arn,
+        Handler="index.handler",
+        Code={"ZipFile": b"fake code"},
+        VpcConfig={
+            "SubnetIds": [subnet_id],
+            "SecurityGroupIds": [sg_id],
+        },
+    )
+
+    # Confirm both resources exist
+    nat_gateways = client.describe_nat_gateways()["NatGateways"]
+    assert any(n["NatGatewayId"] == nat_gateway_id for n in nat_gateways)
+
+    functions = lambda_client.list_functions()["Functions"]
+    test_function = next((f for f in functions if f["FunctionName"] == function_name), None)
+    assert test_function is not None
+    assert subnet_id in test_function["VpcConfig"]["SubnetIds"]
+
+    # Run delete function
+    result = df.delete_subnet(arn, region)
+    output = capsys.readouterr().out
+
+    assert f"Deleting subnet '{subnet_id}' in {region}..." in output
+    assert "Checking for NAT Gateways, EC2 instances, and Lambda functions..." in output
+    assert "Found 2 resource(s) in subnet" in output
+    assert "natgateway:" in output
+    assert nat_gateway_id in output
+    assert "function:" in output
+    assert function_name in output
+    assert f"Deleting Nat Gateway '{nat_gateway_id}'" in output
+    assert f"Deleting Lambda function" in output
+    assert "Initiating subnet deletion..." in output
+    assert f"Subnet '{subnet_id}' was successfully deleted" in output
+    assert result is None
+
+    # Confirm all resources were deleted
+    functions = lambda_client.list_functions()["Functions"]
+    assert not any(f["FunctionName"] == function_name for f in functions)
+
+    subnets = client.describe_subnets()["Subnets"]
+    assert not any(s["SubnetId"] == subnet_id for s in subnets)
+
+
+def test_delete_subnet_no_dependencies(capsys, subnet):
+    region, client, arn, subnet_id, _ = subnet
+    logger.debug(f"Subnet ID for test: {subnet_id}")
+
+    # Run delete function on subnet with no dependencies
+    result = df.delete_subnet(arn, region)
+    output = capsys.readouterr().out
+
+    assert f"Deleting subnet '{subnet_id}' in {region}..." in output
+    assert "Checking for NAT Gateways, EC2 instances, and Lambda functions..." in output
+    assert f"No dependencies found in subnet '{subnet_id}'" in output
     assert "Initiating subnet deletion..." in output
     assert f"Subnet '{subnet_id}' was successfully deleted" in output
     assert result is None
@@ -457,7 +627,7 @@ def test_delete_vpc(capsys, vpc):
     result = df.delete_vpc(arn, region)
     output = capsys.readouterr().out
     assert f"Deleting VPC '{vpc_id}' in {region}..." in output
-    assert f"Checking VPC '{vpc_id}' for security groups..." in output
+    assert f"Checking VPC '{vpc_id}' for attached resources..." in output
     assert "Deleting VPC..." in output
     assert f"VPC '{vpc_id}' was successfully deleted" in output
     logger.debug(output)

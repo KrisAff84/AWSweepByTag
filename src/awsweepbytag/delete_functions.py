@@ -65,7 +65,6 @@ from datetime import datetime
 import boto3
 import botocore.exceptions
 
-from awsweepbytag import main_delete as md
 from awsweepbytag import text_formatting as tf
 
 #####################################################################
@@ -1167,17 +1166,26 @@ def delete_snapshot(arn: str, region: str) -> None:
 
 
 # TODO: Add a check for hanging ENIs
-def delete_subnet(arn: str, region: str, dependency_checker: bool = False) -> None:
+def delete_subnet(arn: str, region: str, dependency_checker: bool = False) -> list[dict] | None:
     """
     Delete a subnet in a given region by ARN.
 
-    1. Calls subnet_dependency_checker to check for Route Tables and NAT Gateways
-    2. Deletes subnet
+    1. Checks if subnet still exists (may have been deleted already)
+    2. Calls subnet_dependency_checker to check for Route Tables, NAT Gateways, and EC2 instances
+    3. Deletes any dependencies found
+    4. Checks for ENIs (including those in 'deleting' state from Lambda cleanup)
+    5. Deletes subnet
 
     Args:
         arn (str): The ARN of the subnet to delete
         region (str): The region the subnet is in
+        dependency_checker (bool, optional): Whether this function was called by a dependency checker. Defaults to False.
+
+    Returns:
+        list[dict] | None: List of resources that failed to delete, or None if all successful
     """
+    from awsweepbytag import dep_checkers
+    from awsweepbytag import main_delete as md
 
     client = boto3.client("ec2", region_name=region)
     subnet_id = arn.split("/")[-1]
@@ -1187,32 +1195,85 @@ def delete_subnet(arn: str, region: str, dependency_checker: bool = False) -> No
     else:
         tf.header_print(f"Deleting subnet '{subnet_id}' in {region}...")
 
-    subnet_dependency_checker(arn, region)
+    # Check if subnet still exists
+    try:
+        client.describe_subnets(SubnetIds=[subnet_id])
+    except botocore.exceptions.ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "InvalidSubnetID.NotFound":
+            tf.success_print(f"Subnet '{subnet_id}' was already deleted")
+            return None
+        raise
 
-    # # Check for any ENIs in the subnet
-    # enis = client.describe_network_interfaces(Filters=[{'Name': 'subnet-id', 'Values': [subnet_id]}])['NetworkInterfaces']
-    # interface_enis = [eni for eni in enis if eni["InterfaceType"] == "interface"]
-    # if interface_enis:
-    #     print(f"Subnet {subnet_id} contains the following Elastic Network Interfaces (ENIs):\n")
-    #     for eni in interface_enis:
-    #         print(eni['NetworkInterfaceId'])
-    #     print(f"\nDetaching ENIs from subnet {subnet_id}...")
-    #     for eni in interface_enis:
-    #         response = client.detach_network_interface(AttachmentId=eni['Attachment']['AttachmentId'], Force=True)
-    #         if 200 <= response['ResponseMetadata']['HTTPStatusCode'] < 300:
-    #             print(f"\nENI {eni['NetworkInterfaceId']} was successfully detached from subnet {subnet_id}")
-    #         else:
-    #             print(f"\nENI {eni['NetworkInterfaceId']} was not successfully detached from subnet {subnet_id}")
-    #         tf.indent_print(json.dumps(response, indent=4, default=str))
+    # Check for and collect dependencies
+    dependencies, skip = dep_checkers.subnet_dependency_checker(arn, region)
+
+    # If user chose to skip deletion, return None
+    if skip:
+        return None
+
+    # Delete dependencies if any were found
+    failed_deletions = []
+    if dependencies:
+        for dep in dependencies:
+            result = md.delete_resource(dep, True)
+            if result:
+                if isinstance(result, list):
+                    failed_deletions.extend(result)
+                else:
+                    failed_deletions.append(result)
+
+        # Retry failed deletions
+        if failed_deletions:
+            md.retry_failed_deletions(failed_deletions)
+
+    # Check for ENIs that may still be deleting (e.g., from Lambda cleanup)
+    # Lambda-managed ENIs can take time to fully delete after the Lambda function is removed
+    enis_response = client.describe_network_interfaces(Filters=[{"Name": "subnet-id", "Values": [subnet_id]}])
+    enis = enis_response.get("NetworkInterfaces", [])
+
+    if enis:
+        # Filter out ENIs that are truly blocking (not already deleting or available for cleanup)
+        blocking_enis = []
+        for eni in enis:
+            status = eni.get("Status", "unknown")
+            description = eni.get("Description", "")
+            interface_type = eni.get("InterfaceType", "interface")
+
+            # Lambda ENIs have specific descriptions and are managed by AWS
+            # They should be in "deleting" or "in-use" state right after Lambda deletion
+            if status in ["in-use", "available", "deleting"]:
+                blocking_enis.append(eni)
+
+        if blocking_enis:
+            eni_ids = [eni["NetworkInterfaceId"] for eni in blocking_enis]
+            eni_statuses = [eni.get("Status", "unknown") for eni in blocking_enis]
+            eni_descriptions = [eni.get("Description", "")[:50] for eni in blocking_enis]  # Truncate long descriptions
+
+            tf.indent_print(f"Found {len(blocking_enis)} ENI(s) still associated with subnet (statuses: {', '.join(eni_statuses)})")
+            tf.indent_print(f"ENI IDs: {', '.join(eni_ids)}")
+            if any(eni_descriptions):
+                tf.indent_print(f"Descriptions: {', '.join(eni_descriptions)}")
+            tf.indent_print("Waiting for ENIs to finish deleting before retrying subnet deletion...\n")
+            # Raise DependencyViolation to trigger retry logic
+            raise botocore.exceptions.ClientError(
+                {"Error": {"Code": "DependencyViolation", "Message": "ENIs still exist in subnet"}}, "DeleteSubnet"
+            )
 
     # Delete subnet
     tf.indent_print("Initiating subnet deletion...\n")
-    response = client.delete_subnet(SubnetId=subnet_id)
-    if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-        tf.success_print(f"Subnet '{subnet_id}' was successfully deleted")
-    else:
-        tf.failure_print(f"Subnet '{subnet_id}' was not successfully deleted")
-    tf.response_print(json.dumps(response, indent=4, default=str))
+    try:
+        response = client.delete_subnet(SubnetId=subnet_id)
+        if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
+            tf.success_print(f"Subnet '{subnet_id}' was successfully deleted")
+        else:
+            tf.failure_print(f"Subnet '{subnet_id}' was not successfully deleted")
+        tf.response_print(json.dumps(response, indent=4, default=str))
+    except botocore.exceptions.ClientError as e:
+        # Re-raise all errors to be handled by delete_resource() in main_delete.py
+        raise
+
+
+
 
 
 def delete_vpc_endpoint(arn: str, region: str, dependency_checker: bool = False) -> None:
@@ -1266,27 +1327,47 @@ def delete_vpc_endpoint(arn: str, region: str, dependency_checker: bool = False)
 
 def delete_vpc(arn: str, region: str) -> None:
     """
-    Deletes a VPC and all of its security groups in a given region by ARN
+    Deletes a VPC and all of its dependencies in a given region by ARN
 
-    First checks to see if the VPC contains any security groups and deletes them first.
-    Then the VPC is deleted.
+    First checks for VPC dependencies (endpoints, subnets, IGWs, route tables, security groups).
+    Prompts user for confirmation, then deletes dependencies before deleting the VPC.
 
     Args:
         arn (str): The ARN of the VPC to delete
         region (str): The region the VPC is in
 
     Returns:
-        list[dict] | None: Retryable security groups that could not be deleted, or None if they were all successfully deleted
+        None
     """
+    from awsweepbytag import dep_checkers
+    from awsweepbytag import main_delete as md
 
     client = boto3.client("ec2", region_name=region)
     vpc_id = arn.split("/")[-1]
     tf.header_print(f"Deleting VPC '{vpc_id}' in {region}...")
 
-    skip = vpc_dependency_checker(arn, region)
+    # Check for dependencies and get user confirmation
+    dependencies, skip = dep_checkers.vpc_dependency_checker(arn, region)
 
     if skip:
         return None
+
+    # Delete dependencies if any were found
+    if dependencies:
+        failed_deletions = []
+        for dependency in dependencies:
+            result = md.delete_resource(dependency, True)
+            if result:
+                if isinstance(result, list):
+                    failed_deletions.extend(result)
+                else:
+                    failed_deletions.append(result)
+
+        if failed_deletions:
+            md.retry_failed_deletions(failed_deletions)
+        else:
+            print()
+            tf.success_print("All VPC dependencies were successfully deleted.\n")
 
     tf.subheader_print("Deleting VPC...")
     try:
@@ -1314,201 +1395,6 @@ def delete_vpc(arn: str, region: str) -> None:
         raise
 
     return None
-
-
-def subnet_dependency_checker(subnet_arn: str, region: str) -> None:
-    """
-    Checks for subnet dependencies.
-
-    1. Checks for any route tables associated with subnet
-    2. Disassociates route tables if they exist
-    3. Checks for any NAT Gateways in subnet
-    4. Deletes NAT Gateways if they exist
-
-    Args:
-        subnet_id (str): The ID of the subnet to check for dependencies
-        region (str): The region the subnet is in
-
-    """
-    subnet_id = subnet_arn.split("/")[-1]
-    account_id = subnet_arn.split(":")[4]
-
-    client = boto3.client("ec2", region_name=region)
-    tf.subheader_print(f"Checking for resources attached to subnet '{subnet_id}'...")
-
-    # Find any route tables associated with the subnet and detach them
-    tf.indent_print("Looking for associated route tables...\n")
-    route_tables = client.describe_route_tables(Filters=[{"Name": "association.subnet-id", "Values": [subnet_id]}])["RouteTables"]
-    associations = [
-        {
-            "route_table_id": rt["RouteTableId"],
-            "association_id": assoc["RouteTableAssociationId"],
-        }
-        for rt in route_tables
-        for assoc in rt.get("Associations", [])
-        if assoc.get("SubnetId") == subnet_id
-    ]
-
-    # Disassociate route tables from subnet if they are associated
-    if associations:
-        tf.indent_print(f"Route tables associated with subnet '{subnet_id}':\n")
-        for rt in associations:
-            tf.indent_print(rt["route_table_id"], indent=6)
-        print()
-        tf.indent_print(f"Disassociating route tables from subnet '{subnet_id}'...\n")
-        for rt in associations:
-            response = client.disassociate_route_table(AssociationId=rt["association_id"])
-            if 200 <= response["ResponseMetadata"]["HTTPStatusCode"] < 300:
-                tf.success_print(f"Route table {rt['route_table_id']} was successfully disassociated from subnet '{subnet_id}'")
-            else:
-                tf.failure_print(f"Route table {rt['route_table_id']} was not successfully disassociated from subnet '{subnet_id}'")
-            tf.response_print(json.dumps(response, indent=4, default=str))
-
-    # Check for NAT Gateways
-    tf.indent_print("Checking for NAT Gateways...\n")
-    nat_gateways = client.describe_nat_gateways(Filters=[{"Name": "subnet-id", "Values": [subnet_id]}])["NatGateways"]
-    nat_gateway_ids = [ng["NatGatewayId"] for ng in nat_gateways]
-
-    if len(nat_gateways) == 0:
-        tf.indent_print(f"No NAT Gateways found in subnet '{subnet_id}'.\n")
-        return
-
-    attached_nats = []
-    tf.indent_print(f"NAT Gateways in subnet '{subnet_id}':\n")
-    for ng in nat_gateway_ids:
-        nat_arn = f"arn:aws:ec2:{region}:{account_id}:nat-gateway/{ng}"
-        tf.indent_print(ng, indent=6)
-        attached_nats.append({"resource_type": "natgateway", "arn": nat_arn, "service": "ec2", "region": region})
-    print()
-
-    failed_deletions = []
-    for nat in attached_nats:
-        result = md.delete_resource(nat, True)
-        if result:
-            if isinstance(result, list):
-                failed_deletions.extend(result)
-            else:
-                failed_deletions.append(result)
-
-    if failed_deletions:
-        md.retry_failed_deletions(failed_deletions)
-
-    return
-
-
-def vpc_dependency_checker(vpc_arn: str, region: str) -> bool:
-    """
-    Check a VPC for dependencies and prompts for deletion.
-
-    1. Checks the VPC for the following dependencies that would prevent VPC deletion:
-        - VPC Endpoints
-        - Subnets
-        - Internet Gateways
-        - Route Tables
-        - Security Groups
-    2. Prompts for deletion of all dependencies (and VPC)
-    3. If deletion is confirmed, deletes all dependencies and returns False (whether to skip VPC deletion) to delete_vpc
-    4. If deletion is not confirmed, returns True to skip VPC deletion
-
-    Returns:
-       bool: Whether to skip VPC deletion (True = skip, False = do not skip)
-
-    """
-    vpc_id = vpc_arn.split("/")[-1]
-    account_id = vpc_arn.split(":")[4]
-
-    tf.subheader_print(f"Checking VPC '{vpc_id}' for attached resources...")
-
-    client = boto3.client("ec2", region_name=region)
-
-    # Check for the following attached resources: vpc_endpoints, subnets, internet gateways, route_tables, security_groups
-    # NAT Gateway dependency check should be added to delete_subnet function
-    # Also need to check and see if these resources would still show up if it has previously been deleted by its own deletion function
-    vpc_resource_map = [
-        {
-            "method": client.describe_vpc_endpoints,
-            "filters": [{"Name": "vpc-id", "Values": [vpc_id]}],
-            "response_key": "VpcEndpoints",
-            "id_key": "VpcEndpointId",
-            "resource_type": "vpc-endpoint",
-        },
-        {
-            "method": client.describe_subnets,
-            "filters": [{"Name": "vpc-id", "Values": [vpc_id]}],
-            "response_key": "Subnets",
-            "id_key": "SubnetId",
-            "resource_type": "subnet",
-        },
-        {
-            "method": client.describe_internet_gateways,
-            "filters": [{"Name": "attachment.vpc-id", "Values": [vpc_id]}],
-            "response_key": "InternetGateways",
-            "id_key": "InternetGatewayId",
-            "resource_type": "internet-gateway",
-        },
-        {
-            "method": client.describe_route_tables,
-            "filters": [{"Name": "vpc-id", "Values": [vpc_id]}, {"Name": "association.main", "Values": ["false"]}],
-            "response_key": "RouteTables",
-            "id_key": "RouteTableId",
-            "resource_type": "route-table",
-        },
-    ]
-
-    dependencies = []
-
-    # Collects attached vpc_endpoints, subnets, internet_gateways, route_tables
-    for meta in vpc_resource_map:
-        response = meta["method"](Filters=meta["filters"])
-        for resource in response.get(meta["response_key"], []):
-            resource_id = resource.get(meta["id_key"])
-            if not resource_id:
-                continue
-            resource_type = meta["resource_type"]
-            arn = f"arn:aws:ec2:{region}:{account_id}:{resource_type}/{resource_id}"
-            dependencies.append({"resource_type": meta["resource_type"].replace("-", ""), "arn": arn, "service": "ec2", "region": region})
-
-    # Security groups handled separately since "default" needs to be filtered out of response
-    security_groups = client.describe_security_groups(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])["SecurityGroups"]
-    for sg in security_groups:
-        if sg["GroupName"] != "default":
-            resource_id = sg["GroupId"]
-            arn = f"arn:aws:ec2:{region}:{account_id}:security-group/{resource_id}"
-            dependencies.append({"resource_type": "securitygroup", "arn": arn, "service": "ec2", "region": region})
-    if len(dependencies) == 0:
-        tf.indent_print(f"No dependencies found for VPC '{vpc_id}\n")
-        return False
-
-    tf.subheader_print(f"Found the following dependencies attached to VPC '{vpc_id}'")
-    for dependency in dependencies:
-        print(json.dumps(dependency, indent=4))
-
-    print()
-    delete = tf.y_n_prompt("If you continue all dependencies will be deleted as well. Continue?")
-    print()
-
-    if delete != "y":
-        print()
-        tf.indent_print(f"Skipping deletion of VPC '{vpc_id}' and its dependencies...\n")
-        return True
-
-    failed_deletions = []
-    for dependency in dependencies:
-        result = md.delete_resource(dependency, True)
-        if result:
-            if isinstance(result, list):
-                failed_deletions.extend(result)
-            else:
-                failed_deletions.append(result)
-
-    if failed_deletions:
-        md.retry_failed_deletions(failed_deletions)
-
-    else:
-        print()
-        tf.success_print("All VPC dependencices were successfully deleted.\n")
-
-    return False
 
 
 #####################################################################
